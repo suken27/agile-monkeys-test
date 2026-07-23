@@ -1,0 +1,600 @@
+
+SPECS.md
+initialize the java project, only include what is necessary to run spring boot on the correct folder structure
+Read SPECS.md
+Bash
+IN
+ls -la /home/juanjo/git/agile-monkeys-test/
+
+OUT
+total 52
+drwxrwxr-x  5 juanjo juanjo  4096 Jul 23 18:40 .
+drwxrwxr-x 20 juanjo juanjo  4096 Jul 23 12:54 ..
+drwxrwxr-x  2 juanjo juanjo  4096 Jul 23 18:40 AI-chat-logs
+drwxrwxr-x  2 juanjo juanjo  4096 Jul 21 20:51 .claude
+drwxrwxr-x  9 juanjo juanjo  4096 Jul 23 18:40 .git
+-rw-rw-r--  1 juanjo juanjo  3008 Jul 23 18:40 originalDescription.md
+-rw-rw-r--  1 juanjo juanjo 25232 Jul 23 18:40 SPECS.md
+Bash
+IN
+java -version 2>&1; echo "---"; mvn -version 2>&1
+
+OUT
+Exit code 127
+openjdk version "25.0.3" 2026-04-21
+OpenJDK Runtime Environment (build 25.0.3+9-2-24.04.2-Ubuntu)
+OpenJDK 64-Bit Server VM (build 25.0.3+9-2-24.04.2-Ubuntu, mixed mode, sharing)
+---
+/bin/bash: line 1: mvn: command not found
+Bash
+IN
+which apt-get sdk 2>&1; echo "---"; apt list --installed 2>/dev/null | grep -i maven; echo "---"; ls /opt /usr/share/maven* 2>&1; echo "---"; curl -sI https://repo.maven.apache.org --max-time 5 2>&1 | head -5
+
+OUT
+/usr/bin/apt-get
+---
+---
+/opt:
+brave.com
+calibre
+containerd
+
+/usr/share/maven-repo:
+org
+---
+HTTP/2 200 
+date: Thu, 23 Jul 2026 16:42:50 GMT
+content-type: text/html
+cf-ray: a1fc2403196dba1f-MAD
+cf-cache-status: HIT
+Bash
+IN
+sudo -n true 2>&1 && echo "passwordless sudo OK" || echo "no passwordless sudo"
+
+OUT
+sudo: a password is required
+no passwordless sudo
+Bash
+IN
+curl -s --max-time 10 "https://start.spring.io/metadata/client" | head -c 500; echo
+
+OUT
+{"_links":{"gradle-project":{"href":"https://start.spring.io/starter.zip?type=gradle-project{&dependencies,packaging,javaVersion,language,bootVersion,groupId,artifactId,version,name,description,packageName}","templated":true},"gradle-project-kotlin":{"href":"https://start.spring.io/starter.zip?type=gradle-project-kotlin{&dependencies,packaging,javaVersion,language,bootVersion,groupId,artifactId,version,name,description,packageName}","templated":true},"gradle-build":{"href":"https://start.spring.
+Spring Initializr is reachable. I'll generate a Maven-based Spring Boot 3 project (Java 21) scaffolded to com.releasepilot, then lay out the empty package folders from the spec.
+
+Bash
+IN
+curl -s "https://start.spring.io/starter.zip" \
+  -d type=maven-project \
+  -d language=java \
+  -d bootVersion=3.5.3 \
+  -d baseDir=. \
+  -d groupId=com.releasepilot \
+  -d artifactId=releasepilot \
+  -d name=ReleasePilot \
+  -d description="ReleasePilot promotion pipeline service" \
+  -d packageName=com.releasepilot \
+  -d packaging=jar \
+  -d javaVersion=21 \
+  -d dependencies=web \
+  -o releasepilot.zip && unzip -o releasepilot.zip -d . > /dev/null && rm releasepilot.zip && find . -not -path './.git*' -not -path './AI-chat-logs*' | sort
+
+OUT
+Exit code 9
+  End-of-central-directory signature not found.  Either this file is not
+  a zipfile, or it constitutes one disk of a multi-part archive.  In the
+  latter case the central directory and zipfile comment will be found on
+  the last disk(s) of this archive.
+unzip:  cannot find zipfile directory in one of releasepilot.zip or
+        releasepilot.zip.zip, and cannot find releasepilot.zip.ZIP, period.
+Bash
+IN
+cat /home/juanjo/git/agile-monkeys-test/releasepilot.zip 2>/dev/null | head -c 1000; ls -la /home/juanjo/git/agile-monkeys-test/*.zip 2>/dev/null
+
+OUT
+{"timestamp":"2026-07-23T16:43:11.881Z","status":400,"error":"Bad Request","message":"Invalid Spring Boot version '3.5.3', Spring Boot compatibility range is >=4.0.0","path":"/starter.zip"}-rw-rw-r-- 1 juanjo juanjo 189 Jul 23 18:43 /home/juanjo/git/agile-monkeys-test/releasepilot.zip
+Bash
+IN
+rm -f /home/juanjo/git/agile-monkeys-test/releasepilot.zip; curl -s "https://start.spring.io/metadata/client" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d['bootVersion'], indent=2))"
+
+OUT
+{
+  "type": "single-select",
+  "default": "4.1.0.RELEASE",
+  "values": [
+    {
+      "id": "4.1.1.BUILD-SNAPSHOT",
+      "name": "4.1.1 (SNAPSHOT)"
+    },
+    {
+      "id": "4.1.0.RELEASE",
+      "name": "4.1.0"
+    },
+    {
+      "id": "4.0.8.BUILD-SNAPSHOT",
+      "name": "4.0.8 (SNAPSHOT)"
+    },
+    {
+      "id": "4.0.7.RELEASE",
+      "name": "4.0.7"
+    }
+  ]
+}
+Bash
+IN
+curl -s "https://start.spring.io/metadata/client" | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d['javaVersion'], indent=2))"
+
+OUT
+{
+  "type": "single-select",
+  "default": "17",
+  "values": [
+    {
+      "id": "26",
+      "name": "26"
+    },
+    {
+      "id": "25",
+      "name": "25"
+    },
+    {
+      "id": "21",
+      "name": "21"
+    },
+    {
+      "id": "17",
+      "name": "17"
+    }
+  ]
+}
+Good, Java 21 is supported. Let me regenerate with Spring Boot 4.0.7 (latest stable release).
+
+Bash
+IN
+curl -s "https://start.spring.io/starter.zip" \
+  -d type=maven-project \
+  -d language=java \
+  -d bootVersion=4.0.7.RELEASE \
+  -d groupId=com.releasepilot \
+  -d artifactId=releasepilot \
+  -d name=ReleasePilot \
+  -d description="ReleasePilot promotion pipeline service" \
+  -d packageName=com.releasepilot \
+  -d packaging=jar \
+  -d javaVersion=21 \
+  -d dependencies=web \
+  -o releasepilot.zip && file releasepilot.zip && unzip -o releasepilot.zip -d . > /dev/null && rm releasepilot.zip && find . -not -path './.git*' -not -path './AI-chat-logs*' -not -path './.claude*' | sort
+
+OUT
+releasepilot.zip: Zip archive data, at least v2.0 to extract, compression method=deflate
+.
+./HELP.md
+./.mvn
+./mvnw
+./mvnw.cmd
+./.mvn/wrapper
+./.mvn/wrapper/maven-wrapper.properties
+./originalDescription.md
+./pom.xml
+./SPECS.md
+./src
+./src/main
+./src/main/java
+./src/main/java/com
+./src/main/java/com/releasepilot
+./src/main/java/com/releasepilot/ReleasePilotApplication.java
+./src/main/resources
+./src/main/resources/application.properties
+./src/main/resources/static
+./src/main/resources/templates
+./src/test
+./src/test/java
+./src/test/java/com
+./src/test/java/com/releasepilot
+./src/test/java/com/releasepilot/ReleasePilotApplicationTests.java
+Now let me set up the package folder structure from SPECS.md §12, and clean up the unneeded Spring MVC static/templates dirs (this is an API-only service, no web UI).
+
+Bash
+IN
+rm -rf /home/juanjo/git/agile-monkeys-test/HELP.md /home/juanjo/git/agile-monkeys-test/src/main/resources/static /home/juanjo/git/agile-monkeys-test/src/main/resources/templates
+cd /home/juanjo/git/agile-monkeys-test
+BASE=src/main/java/com/releasepilot
+mkdir -p "$BASE/domain/promotion/errors"
+mkdir -p "$BASE/domain/ports"
+mkdir -p "$BASE/application/commands"
+mkdir -p "$BASE/application/queries"
+mkdir -p "$BASE/infrastructure/persistence/readmodel"
+mkdir -p "$BASE/infrastructure/adapters/inmemory"
+mkdir -p "$BASE/infrastructure/queue"
+mkdir -p "$BASE/consumers"
+mkdir -p "$BASE/api/controllers"
+mkdir -p src/main/resources/db/migration
+find "$BASE" -type d | sort
+
+OUT
+src/main/java/com/releasepilot
+src/main/java/com/releasepilot/api
+src/main/java/com/releasepilot/api/controllers
+src/main/java/com/releasepilot/application
+src/main/java/com/releasepilot/application/commands
+src/main/java/com/releasepilot/application/queries
+src/main/java/com/releasepilot/consumers
+src/main/java/com/releasepilot/domain
+src/main/java/com/releasepilot/domain/ports
+src/main/java/com/releasepilot/domain/promotion
+src/main/java/com/releasepilot/domain/promotion/errors
+src/main/java/com/releasepilot/infrastructure
+src/main/java/com/releasepilot/infrastructure/adapters
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory
+src/main/java/com/releasepilot/infrastructure/persistence
+src/main/java/com/releasepilot/infrastructure/persistence/readmodel
+src/main/java/com/releasepilot/infrastructure/queue
+Read pom.xml
+Edit pom.xml
+Removed 13 lines
+Click to expand
+Now let's check the generated application class and properties file, and add .gitkeep placeholders so the empty scaffold folders survive in git.
+
+Read ReleasePilotApplication.java
+Bash
+IN
+cat /home/juanjo/git/agile-monkeys-test/src/main/resources/application.properties
+
+OUT
+spring.application.name=ReleasePilot
+Bash
+IN
+cd /home/juanjo/git/agile-monkeys-test
+mv src/main/resources/application.properties src/main/resources/application.yml
+printf 'spring:\n  application:\n    name: ReleasePilot\n' > src/main/resources/application.yml
+cat src/main/resources/application.yml
+
+OUT
+spring:
+  application:
+    name: ReleasePilot
+Now let's add .gitkeep files to the empty scaffold directories so git tracks the folder structure, then verify the project builds and runs.
+
+Bash
+IN
+cd /home/juanjo/git/agile-monkeys-test
+BASE=src/main/java/com/releasepilot
+for d in \
+  "$BASE/domain/promotion/errors" \
+  "$BASE/domain/ports" \
+  "$BASE/application/commands" \
+  "$BASE/application/queries" \
+  "$BASE/infrastructure/persistence/readmodel" \
+  "$BASE/infrastructure/adapters/inmemory" \
+  "$BASE/infrastructure/queue" \
+  "$BASE/consumers" \
+  "$BASE/api/controllers" \
+  src/main/resources/db/migration ; do
+  touch "$d/.gitkeep"
+done
+find "$BASE" src/main/resources/db -type f | sort
+
+OUT
+src/main/java/com/releasepilot/api/controllers/.gitkeep
+src/main/java/com/releasepilot/application/commands/.gitkeep
+src/main/java/com/releasepilot/application/queries/.gitkeep
+src/main/java/com/releasepilot/consumers/.gitkeep
+src/main/java/com/releasepilot/domain/ports/.gitkeep
+src/main/java/com/releasepilot/domain/promotion/errors/.gitkeep
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/.gitkeep
+src/main/java/com/releasepilot/infrastructure/persistence/readmodel/.gitkeep
+src/main/java/com/releasepilot/infrastructure/queue/.gitkeep
+src/main/java/com/releasepilot/ReleasePilotApplication.java
+src/main/resources/db/migration/.gitkeep
+Now let's verify the project actually builds and runs with the Maven wrapper.
+
+Bash
+IN
+chmod +x mvnw && ./mvnw -q -o compile 2>&1 | tail -50 || ./mvnw -q compile 2>&1 | tail -80
+
+OUT
+[ERROR] [ERROR] Some problems were encountered while processing the POMs:
+[FATAL] Non-resolvable parent POM for com.releasepilot:releasepilot:0.0.1-SNAPSHOT: The following artifacts could not be resolved: org.springframework.boot:spring-boot-starter-parent:pom:4.0.7.RELEASE (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.springframework.boot:spring-boot-starter-parent:pom:4.0.7.RELEASE has not been downloaded from it before. and 'parent.relativePath' points at no local POM @ line 5, column 10
+ @ 
+[ERROR] The build could not read 1 project -> [Help 1]
+[ERROR]   
+[ERROR]   The project com.releasepilot:releasepilot:0.0.1-SNAPSHOT (/home/juanjo/git/agile-monkeys-test/pom.xml) has 1 error
+[ERROR]     Non-resolvable parent POM for com.releasepilot:releasepilot:0.0.1-SNAPSHOT: The following artifacts could not be resolved: org.springframework.boot:spring-boot-starter-parent:pom:4.0.7.RELEASE (absent): Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.springframework.boot:spring-boot-starter-parent:pom:4.0.7.RELEASE has not been downloaded from it before. and 'parent.relativePath' points at no local POM @ line 5, column 10 -> [Help 2]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException
+[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/UnresolvableModelException
+The -o (offline) flag ran first without network. Let me retry online.
+
+Bash
+IN
+./mvnw -q compile 2>&1 | tail -100
+
+OUT
+[ERROR] [ERROR] Some problems were encountered while processing the POMs:
+[FATAL] Non-resolvable parent POM for com.releasepilot:releasepilot:0.0.1-SNAPSHOT: The following artifacts could not be resolved: org.springframework.boot:spring-boot-starter-parent:pom:4.0.7.RELEASE (absent): org.springframework.boot:spring-boot-starter-parent:pom:4.0.7.RELEASE was not found in https://repo.maven.apache.org/maven2 during a previous attempt. This failure was cached in the local repository and resolution is not reattempted until the update interval of central has elapsed or updates are forced and 'parent.relativePath' points at no local POM @ line 5, column 10
+ @ 
+[ERROR] The build could not read 1 project -> [Help 1]
+[ERROR]   
+[ERROR]   The project com.releasepilot:releasepilot:0.0.1-SNAPSHOT (/home/juanjo/git/agile-monkeys-test/pom.xml) has 1 error
+[ERROR]     Non-resolvable parent POM for com.releasepilot:releasepilot:0.0.1-SNAPSHOT: The following artifacts could not be resolved: org.springframework.boot:spring-boot-starter-parent:pom:4.0.7.RELEASE (absent): org.springframework.boot:spring-boot-starter-parent:pom:4.0.7.RELEASE was not found in https://repo.maven.apache.org/maven2 during a previous attempt. This failure was cached in the local repository and resolution is not reattempted until the update interval of central has elapsed or updates are forced and 'parent.relativePath' points at no local POM @ line 5, column 10 -> [Help 2]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/ProjectBuildingException
+[ERROR] [Help 2] http://cwiki.apache.org/confluence/display/MAVEN/UnresolvableModelException
+Bash
+IN
+curl -s "https://repo.maven.apache.org/maven2/org/springframework/boot/spring-boot-starter-parent/maven-metadata.xml" | grep -oP '<version>\K[^<]+' | tail -20
+
+OUT
+3.5.16
+4.0.0-M1
+4.0.0-M2
+4.0.0-M3
+4.0.0-RC1
+4.0.0-RC2
+4.0.0
+4.0.1
+4.0.2
+4.0.3
+4.0.4
+4.0.5
+4.0.6
+4.0.7
+4.1.0-M1
+4.1.0-M2
+4.1.0-M3
+4.1.0-M4
+4.1.0-RC1
+4.1.0
+Edit pom.xml
+Modified
+Bash
+IN
+./mvnw -q compile 2>&1 | tail -100
+
+OUT
+(Bash completed with no output)
+Compiles cleanly. Now let's verify it actually boots as a Spring Boot app.
+
+Bash
+IN
+cd /home/juanjo/git/agile-monkeys-test
+timeout 40 ./mvnw -q spring-boot:run > /tmp/claude-1000/-home-juanjo-git-agile-monkeys-test/85532b5b-d8ae-4b08-8469-758dccd147d2/scratchpad/boot.log 2>&1 &
+BOOT_PID=$!
+sleep 15
+grep -E "Started ReleasePilotApplication|ERROR|Tomcat started" /tmp/claude-1000/-home-juanjo-git-agile-monkeys-test/85532b5b-d8ae-4b08-8469-758dccd147d2/scratchpad/boot.log
+kill $BOOT_PID 2>/dev/null
+wait $BOOT_PID 2>/dev/null
+echo done
+
+OUT
+2026-07-23T18:44:46.415+02:00  INFO 14285 --- [ReleasePilot] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat started on port 8080 (http) with context path '/'
+2026-07-23T18:44:46.417+02:00  INFO 14285 --- [ReleasePilot] [           main] c.releasepilot.ReleasePilotApplication   : Started ReleasePilotApplication in 0.546 seconds (process running for 0.646)
+done
+Boots successfully. Let's check the generated .gitignore and clean up leftover processes/artifacts.
+
+Bash
+IN
+cd /home/juanjo/git/agile-monkeys-test
+pkill -f spring-boot:run 2>/dev/null
+cat .gitignore 2>/dev/null
+echo "---"
+ls -la .mvn/wrapper/
+
+OUT
+Exit code 144
+Bash
+IN
+cd /home/juanjo/git/agile-monkeys-test; cat .gitignore 2>/dev/null; echo "---"; ls -la .mvn/wrapper/ 2>/dev/null
+
+OUT
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+---
+total 12
+drwxr-xr-x 2 juanjo juanjo 4096 Jul 23 18:43 .
+drwxr-xr-x 3 juanjo juanjo 4096 Jul 23 18:43 ..
+-rw-r--r-- 1 juanjo juanjo  168 Jul 23 18:43 maven-wrapper.properties
+Bash
+IN
+cd /home/juanjo/git/agile-monkeys-test
+rm -rf target
+git status --short
+echo "---tree---"
+find . -not -path './.git*' -not -path './AI-chat-logs*' -not -path './.claude*' -not -path './target*' | sort
+
+OUT
+?? .gitattributes
+?? .gitignore
+?? .mvn/
+?? mvnw
+?? mvnw.cmd
+?? pom.xml
+?? src/
+---tree---
+.
+./.mvn
+./mvnw
+./mvnw.cmd
+./.mvn/wrapper
+./.mvn/wrapper/maven-wrapper.properties
+./originalDescription.md
+./pom.xml
+./SPECS.md
+./src
+./src/main
+./src/main/java
+./src/main/java/com
+./src/main/java/com/releasepilot
+./src/main/java/com/releasepilot/api
+./src/main/java/com/releasepilot/api/controllers
+./src/main/java/com/releasepilot/api/controllers/.gitkeep
+./src/main/java/com/releasepilot/application
+./src/main/java/com/releasepilot/application/commands
+./src/main/java/com/releasepilot/application/commands/.gitkeep
+./src/main/java/com/releasepilot/application/queries
+./src/main/java/com/releasepilot/application/queries/.gitkeep
+./src/main/java/com/releasepilot/consumers
+./src/main/java/com/releasepilot/consumers/.gitkeep
+./src/main/java/com/releasepilot/domain
+./src/main/java/com/releasepilot/domain/ports
+./src/main/java/com/releasepilot/domain/ports/.gitkeep
+./src/main/java/com/releasepilot/domain/promotion
+./src/main/java/com/releasepilot/domain/promotion/errors
+./src/main/java/com/releasepilot/domain/promotion/errors/.gitkeep
+./src/main/java/com/releasepilot/infrastructure
+./src/main/java/com/releasepilot/infrastructure/adapters
+./src/main/java/com/releasepilot/infrastructure/adapters/inmemory
+./src/main/java/com/releasepilot/infrastructure/adapters/inmemory/.gitkeep
+./src/main/java/com/releasepilot/infrastructure/persistence
+./src/main/java/com/releasepilot/infrastructure/persistence/readmodel
+./src/main/java/com/releasepilot/infrastructure/persistence/readmodel/.gitkeep
+./src/main/java/com/releasepilot/infrastructure/queue
+./src/main/java/com/releasepilot/infrastructure/queue/.gitkeep
+./src/main/java/com/releasepilot/ReleasePilotApplication.java
+./src/main/resources
+./src/main/resources/application.yml
+./src/main/resources/db
+./src/main/resources/db/migration
+./src/main/resources/db/migration/.gitkeep
+./src/test
+./src/test/java
+./src/test/java/com
+./src/test/java/com/releasepilot
+./src/test/java/com/releasepilot/ReleasePilotApplicationTests.java
+Read pom.xml
+This is clean and minimal. The Java/Spring Boot project is initialized and verified working:
+
+Maven project (pom.xml) — Spring Boot 4.0.7, Java 21, only spring-boot-starter-webmvc (+ test starter) — nothing beyond what's needed to run.
+Maven wrapper (mvnw/mvnw.cmd/.mvn/) so no local Maven install is required.
+ReleasePilotApplication.java — standard @SpringBootApplication entrypoint; verified it compiles and boots (Tomcat starts on :8080).
+Package skeleton under com.releasepilot matching §12 of SPECS.md (domain/promotion, domain/ports, application/commands, application/queries, infrastructure/persistence, infrastructure/adapters/inmemory, infrastructure/queue, consumers, api/controllers) — empty dirs hold a .gitkeep so git tracks the structure.
+application.yml with just the app name, and src/main/resources/db/migration/ ready for future Flyway scripts.
+Not included yet (deliberately, per your instruction to keep this to bootstrapping): DDD/CQRS code, Postgres/RabbitMQ/Flyway dependencies, docker-compose.yml, and tests beyond the generated smoke test. Nothing has been committed — let me know if you'd like me to commit this scaffold.
+
+add a readme with the project description and how to run it
+Bash
+IN
+ls /home/juanjo/git/agile-monkeys-test/README.md 2>&1
+
+OUT
+Exit code 2
+ls: cannot access '/home/juanjo/git/agile-monkeys-test/README.md': No such file or directory
+Write README.md
+77 lines
+# ReleasePilot
+
+ReleasePilot is an internal platform that moves an application version through
+an ordered pipeline of deployment environments (`dev → staging → production`).
+It is modeled with **DDD** (a `Promotion` aggregate that owns all business
+rules), **CQRS** (separate write and read paths), and **domain events** (every
+state transition is published and consumed asynchronously).
+
+The API is intentionally thin: it validates input and translates HTTP into
+commands/queries. All business logic — legality of a transition, who can
+approve what, immutability after a terminal state — lives inside the
+aggregate. Rule violations are domain errors mapped to 4xx responses, never
+uncaught exceptions.
+
+See [SPECS.md](SPECS.md) for the full technical specification.
+
+## Tech stack
+
+- Java 21
+- Spring Boot 4 (Spring Web)
+- Maven (via the included Maven Wrapper)
+
+## Prerequisites
+
+- Java 21 (JDK)
+
+No local Maven installation is required — this project uses the Maven
+Wrapper (`mvnw`).
+
+## Running the application
+
+From the project root:
+
+```bash
+./mvnw spring-boot:run
+```
+
+On Windows:
+
+```bash
+mvnw.cmd spring-boot:run
+```
+
+The application starts on [http://localhost:8080](http://localhost:8080).
+
+## Building
+
+```bash
+./mvnw clean package
+```
+
+Produces an executable jar in `target/`, which can be run with:
+
+```bash
+java -jar target/releasepilot-0.0.1-SNAPSHOT.jar
+```
+
+## Running tests
+
+```bash
+./mvnw test
+```
+
+## Project structure
+
+```
+src/main/java/com/releasepilot/
+  domain/          # Promotion aggregate, value objects, invariants, ports
+  application/      # Command and query handlers
+  infrastructure/    # Persistence, in-memory adapters, message queue
+  consumers/         # Async event consumers (audit log, projections, notifications)
+  api/                # Thin REST controllers
+src/main/resources/
+  db/migration/       # Flyway SQL migrations
+  application.yml
+```
+Added README.md with a project description (summarized from SPECS.md) and instructions to run, build, and test via the Maven wrapper, plus a short project-structure overview.
+
