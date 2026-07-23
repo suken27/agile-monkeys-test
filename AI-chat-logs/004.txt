@@ -1,0 +1,1325 @@
+
+SPECS.md
+write the domain logic and the required ports (empty interfaces), only implement the input port that will be called by the HTTP adapters, write the unit tests that check the logic, add the description of the aggregate lifecycle to the README.md, check that the tests pass
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test -type f -not -path "*/.git/*" -not -path "*/target/*" -not -path "*/node_modules/*" | sort
+
+OUT
+/home/juanjo/git/agile-monkeys-test/AI-chat-logs/001.txt
+/home/juanjo/git/agile-monkeys-test/AI-chat-logs/002.txt
+/home/juanjo/git/agile-monkeys-test/AI-chat-logs/003.txt
+/home/juanjo/git/agile-monkeys-test/.claude/settings.local.json
+/home/juanjo/git/agile-monkeys-test/.gitattributes
+/home/juanjo/git/agile-monkeys-test/.gitignore
+/home/juanjo/git/agile-monkeys-test/mvnw
+/home/juanjo/git/agile-monkeys-test/mvnw.cmd
+/home/juanjo/git/agile-monkeys-test/.mvn/wrapper/maven-wrapper.properties
+/home/juanjo/git/agile-monkeys-test/originalDescription.md
+/home/juanjo/git/agile-monkeys-test/pom.xml
+/home/juanjo/git/agile-monkeys-test/README.md
+/home/juanjo/git/agile-monkeys-test/SPECS.md
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/controllers/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/queries/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/consumers/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/adapters/inmemory/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence/readmodel/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/ReleasePilotApplication.java
+/home/juanjo/git/agile-monkeys-test/src/main/resources/application.yml
+/home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration/.gitkeep
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/ReleasePilotApplicationTests.java
+Read SPECS.md
+Read README.md
+Read originalDescription.md
+Read pom.xml
+Bash
+IN
+./mvnw -q dependency:tree -Dincludes=org.junit,org.assertj,org.mockito 2>&1 | tail -80
+
+OUT
+(Bash completed with no output)
+Bash
+IN
+./mvnw dependency:tree 2>&1 | grep -iE "junit|assertj|mockito|webmvc"
+
+OUT
+[INFO] +- org.springframework.boot:spring-boot-starter-webmvc:jar:4.0.7:compile
+[INFO] |  \- org.springframework.boot:spring-boot-webmvc:jar:4.0.7:compile
+[INFO] |     \- org.springframework:spring-webmvc:jar:7.0.8:compile
+[INFO] \- org.springframework.boot:spring-boot-starter-webmvc-test:jar:4.0.7:test
+[INFO]    |  +- org.assertj:assertj-core:jar:3.27.7:test
+[INFO]    |  +- org.junit.jupiter:junit-jupiter:jar:6.0.3:test
+[INFO]    |  |  +- org.junit.jupiter:junit-jupiter-api:jar:6.0.3:test
+[INFO]    |  |  |  +- org.junit.platform:junit-platform-commons:jar:6.0.3:test
+[INFO]    |  |  +- org.junit.jupiter:junit-jupiter-params:jar:6.0.3:test
+[INFO]    |  |  \- org.junit.jupiter:junit-jupiter-engine:jar:6.0.3:test
+[INFO]    |  |     \- org.junit.platform:junit-platform-engine:jar:6.0.3:test
+[INFO]    |  +- org.mockito:mockito-core:jar:5.20.0:test
+[INFO]    |  +- org.mockito:mockito-junit-jupiter:jar:5.20.0:test
+[INFO]    +- org.springframework.boot:spring-boot-webmvc-test:jar:4.0.7:test
+Good — JUnit 5, AssertJ, and Mockito are all available. Now let me write the domain model. First checking the existing test file and package structure conventions.
+
+Read ReleasePilotApplicationTests.java
+Read ReleasePilotApplication.java
+Update Todos
+
+Write domain value objects, PromotionStatus, Environment, Actor, DomainEvent
+
+Write domain error hierarchy
+
+Write Promotion aggregate with invariant-guarded transitions
+
+Write output ports as empty interfaces (Deployment, IssueTracker, Notification)
+
+Write and implement the input port called by HTTP adapters
+
+Write unit tests for aggregate logic and input port
+
+Add aggregate lifecycle description to README.md
+
+Run tests and confirm they pass
+Now let's write the domain layer, starting with value objects and supporting types.
+
+Write Environment.java
+34 lines
+package com.releasepilot.domain.promotion;
+
+import java.util.Optional;
+
+/**
+ * A stage in the deployment pipeline. Fixed, ordered: dev -> staging -> production.
+ */
+public enum Environment {
+
+	DEV,
+	STAGING,
+	PRODUCTION;
+
+	public static Environment first() {
+		return DEV;
+	}
+
+	public Optional<Environment> next() {
+		return switch (this) {
+			case DEV -> Optional.of(STAGING);
+			case STAGING -> Optional.of(PRODUCTION);
+			case PRODUCTION -> Optional.empty();
+		};
+	}
+
+	public Optional<Environment> previous() {
+		return switch (this) {
+			case DEV -> Optional.empty();
+			case STAGING -> Optional.of(DEV);
+			case PRODUCTION -> Optional.of(STAGING);
+		};
+	}
+}
+Write ApplicationId.java
+20 lines
+package com.releasepilot.domain.promotion;
+
+import java.util.Objects;
+import java.util.UUID;
+
+public record ApplicationId(UUID value) {
+
+	public ApplicationId {
+		Objects.requireNonNull(value, "ApplicationId value must not be null");
+	}
+
+	public static ApplicationId of(String value) {
+		return new ApplicationId(UUID.fromString(value));
+	}
+
+	public static ApplicationId random() {
+		return new ApplicationId(UUID.randomUUID());
+	}
+}
+Write PromotionId.java
+20 lines
+package com.releasepilot.domain.promotion;
+
+import java.util.Objects;
+import java.util.UUID;
+
+public record PromotionId(UUID value) {
+
+	public PromotionId {
+		Objects.requireNonNull(value, "PromotionId value must not be null");
+	}
+
+	public static PromotionId of(String value) {
+		return new PromotionId(UUID.fromString(value));
+	}
+
+	public static PromotionId random() {
+		return new PromotionId(UUID.randomUUID());
+	}
+}
+Write Version.java
+14 lines
+package com.releasepilot.domain.promotion;
+
+/**
+ * An opaque, immutable build/artifact identifier for an application (e.g. semver or commit SHA).
+ */
+public record Version(String value) {
+
+	public Version {
+		if (value == null || value.isBlank()) {
+			throw new IllegalArgumentException("Version value must not be blank");
+		}
+	}
+}
+Write Role.java
+7 lines
+package com.releasepilot.domain.promotion;
+
+public enum Role {
+	REQUESTER,
+	APPROVER
+}
+Write Actor.java
+22 lines
+package com.releasepilot.domain.promotion;
+
+import java.util.Objects;
+
+/**
+ * The user performing a command, and the role they act under.
+ */
+public record Actor(String userId, Role role) {
+
+	public Actor {
+		Objects.requireNonNull(userId, "userId must not be null");
+		if (userId.isBlank()) {
+			throw new IllegalArgumentException("userId must not be blank");
+		}
+		Objects.requireNonNull(role, "role must not be null");
+	}
+
+	public boolean isApprover() {
+		return role == Role.APPROVER;
+	}
+}
+Write PromotionStatus.java
+20 lines
+package com.releasepilot.domain.promotion;
+
+/**
+ * The lifecycle state of a {@link Promotion}. Completed, RolledBack and Cancelled are terminal:
+ * no further transitions are possible once a promotion reaches one of them.
+ */
+public enum PromotionStatus {
+
+	REQUESTED,
+	APPROVED,
+	IN_PROGRESS,
+	COMPLETED,
+	ROLLED_BACK,
+	CANCELLED;
+
+	public boolean isTerminal() {
+		return this == COMPLETED || this == ROLLED_BACK || this == CANCELLED;
+	}
+}
+Now the DomainEvent record per §5:
+
+Write DomainEvent.java
+36 lines
+package com.releasepilot.domain.promotion;
+
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * An immutable fact recording one {@link Promotion} state transition. Carries enough data for
+ * downstream consumers to act without calling back into the write side.
+ */
+public record DomainEvent(
+		UUID eventId,
+		String eventType,
+		Instant occurredAt,
+		PromotionId promotionId,
+		ApplicationId applicationId,
+		String actingUser,
+		Map<String, Object> payload) {
+
+	public static DomainEvent of(
+			String eventType,
+			PromotionId promotionId,
+			ApplicationId applicationId,
+			Actor actingActor,
+			Map<String, Object> payload) {
+		return new DomainEvent(
+				UUID.randomUUID(),
+				eventType,
+				Instant.now(),
+				promotionId,
+				applicationId,
+				actingActor.userId(),
+				Map.copyOf(payload));
+	}
+}
+Value objects done. Now the domain error hierarchy.
+
+Update Todos
+
+Write domain value objects, PromotionStatus, Environment, Actor, DomainEvent
+
+Write domain error hierarchy
+
+Write Promotion aggregate with invariant-guarded transitions
+
+Write output ports as empty interfaces (Deployment, IssueTracker, Notification)
+
+Write and implement the input port called by HTTP adapters
+
+Write unit tests for aggregate logic and input port
+
+Add aggregate lifecycle description to README.md
+
+Run tests and confirm they pass
+Write DomainError.java
+19 lines
+package com.releasepilot.domain.promotion.errors;
+
+/**
+ * Base type for every business rule violation raised by the {@code Promotion} aggregate.
+ * Domain errors are always mapped to 4xx responses at the API boundary — they never surface
+ * as uncaught exceptions (never 500).
+ */
+public abstract sealed class DomainError extends RuntimeException permits
+		InvalidTransitionError,
+		EnvironmentSkippedError,
+		UnauthorizedApproverError,
+		PromotionAlreadyTerminalError,
+		DuplicatePromotionInProgressError {
+
+	protected DomainError(String message) {
+		super(message);
+	}
+}
+Expected — those classes don't exist yet. Creating them now.
+
+Write InvalidTransitionError.java
+15 lines
+package com.releasepilot.domain.promotion.errors;
+
+import com.releasepilot.domain.promotion.PromotionStatus;
+
+/**
+ * Raised when a command is issued against a promotion whose current (non-terminal) status
+ * does not permit that transition (e.g. cancelling a promotion that is already in progress).
+ */
+public final class InvalidTransitionError extends DomainError {
+
+	public InvalidTransitionError(PromotionStatus from, String command) {
+		super("Cannot apply command '%s' to a promotion in status %s".formatted(command, from));
+	}
+}
+Write EnvironmentSkippedError.java
+20 lines
+package com.releasepilot.domain.promotion.errors;
+
+import com.releasepilot.domain.promotion.Environment;
+
+/**
+ * Raised when a promotion is requested for a target environment that is not the immediate
+ * next step after the version's last completed environment (invariant #1, no skipping).
+ */
+public final class EnvironmentSkippedError extends DomainError {
+
+	public EnvironmentSkippedError(Environment expectedTarget, Environment requestedTarget) {
+		super("Expected target environment %s but got %s".formatted(expectedTarget, requestedTarget));
+	}
+
+	public EnvironmentSkippedError(Environment requestedTarget) {
+		super("Version has already completed the last pipeline environment; cannot target %s"
+				.formatted(requestedTarget));
+	}
+}
+Write UnauthorizedApproverError.java
+12 lines
+package com.releasepilot.domain.promotion.errors;
+
+/**
+ * Raised when {@code ApprovePromotion} is attempted by an actor without the approver role.
+ */
+public final class UnauthorizedApproverError extends DomainError {
+
+	public UnauthorizedApproverError(String userId) {
+		super("User '%s' does not have the approver role".formatted(userId));
+	}
+}
+Write PromotionAlreadyTerminalError.java
+15 lines
+package com.releasepilot.domain.promotion.errors;
+
+import com.releasepilot.domain.promotion.PromotionStatus;
+
+/**
+ * Raised when any command is issued against a promotion already in a terminal state
+ * (Completed, RolledBack or Cancelled). No field on a terminal promotion may change.
+ */
+public final class PromotionAlreadyTerminalError extends DomainError {
+
+	public PromotionAlreadyTerminalError(PromotionStatus status) {
+		super("Promotion is already in terminal status %s and cannot be modified".formatted(status));
+	}
+}
+Write DuplicatePromotionInProgressError.java
+17 lines
+package com.releasepilot.domain.promotion.errors;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+
+/**
+ * Raised when a promotion is requested for an (application, target environment) pair that
+ * already has a non-terminal promotion in flight (invariant #2).
+ */
+public final class DuplicatePromotionInProgressError extends DomainError {
+
+	public DuplicatePromotionInProgressError(ApplicationId applicationId, Environment targetEnvironment) {
+		super("A non-terminal promotion already exists for application %s targeting %s"
+				.formatted(applicationId.value(), targetEnvironment));
+	}
+}
+Update Todos
+
+Write domain value objects, PromotionStatus, Environment, Actor, DomainEvent
+
+Write domain error hierarchy
+
+Write Promotion aggregate with invariant-guarded transitions
+
+Write output ports as empty interfaces (Deployment, IssueTracker, Notification)
+
+Write and implement the input port called by HTTP adapters
+
+Write unit tests for aggregate logic and input port
+
+Add aggregate lifecycle description to README.md
+
+Run tests and confirm they pass
+Write Promotion.java
+173 lines
+package com.releasepilot.domain.promotion;
+
+import com.releasepilot.domain.promotion.errors.DuplicatePromotionInProgressError;
+import com.releasepilot.domain.promotion.errors.EnvironmentSkippedError;
+import com.releasepilot.domain.promotion.errors.InvalidTransitionError;
+import com.releasepilot.domain.promotion.errors.PromotionAlreadyTerminalError;
+import com.releasepilot.domain.promotion.errors.UnauthorizedApproverError;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+
+/**
+ * Aggregate root. A {@code Promotion} is scoped to one application-version's one hop between
+ * two adjacent pipeline environments, and guards every business rule around that hop itself —
+ * no repository, handler, or API layer can bypass an invariant enforced here.
+ *
+ * <p>Invariants #1 (no skipping) and #2 (no duplicate in-flight promotion for the same target)
+ * span multiple {@code Promotion} instances of the same application, so the data fetching for
+ * those checks is the application layer's job (loading sibling promotions), but the decision
+ * itself is made here, in {@link #request}.
+ */
+public final class Promotion {
+
+	private final PromotionId id;
+	private final ApplicationId applicationId;
+	private final Version version;
+	private final Environment fromEnvironment;
+	private final Environment targetEnvironment;
+	private final Actor requestedBy;
+	private PromotionStatus status;
+	private Actor approvedBy;
+
+	private Promotion(
+			PromotionId id,
+			ApplicationId applicationId,
+			Version version,
+			Environment fromEnvironment,
+			Environment targetEnvironment,
+			Actor requestedBy,
+			PromotionStatus status) {
+		this.id = Objects.requireNonNull(id);
+		this.applicationId = Objects.requireNonNull(applicationId);
+		this.version = Objects.requireNonNull(version);
+		this.fromEnvironment = fromEnvironment;
+		this.targetEnvironment = Objects.requireNonNull(targetEnvironment);
+		this.requestedBy = Objects.requireNonNull(requestedBy);
+		this.status = Objects.requireNonNull(status);
+	}
+
+	/**
+	 * Creates a new promotion request for one step forward in the pipeline.
+	 *
+	 * @param lastCompletedEnvironment the version's last completed environment, or {@code null}
+	 *                                 if the version has not completed any environment yet
+	 * @param targetEnvironment        the environment this promotion would advance the version into
+	 * @param existingPromotionsForTarget every other known promotion for this
+	 *                                 (applicationId, targetEnvironment) pair, fetched by the
+	 *                                 application layer; used to enforce invariant #2
+	 */
+	public static Promotion request(
+			PromotionId id,
+			ApplicationId applicationId,
+			Version version,
+			Environment lastCompletedEnvironment,
+			Environment targetEnvironment,
+			Actor requestedBy,
+			List<Promotion> existingPromotionsForTarget) {
+		Environment expectedTarget = lastCompletedEnvironment == null
+				? Environment.first()
+				: lastCompletedEnvironment.next().orElse(null);
+		if (expectedTarget == null) {
+			throw new EnvironmentSkippedError(targetEnvironment);
+		}
+		if (expectedTarget != targetEnvironment) {
+			throw new EnvironmentSkippedError(expectedTarget, targetEnvironment);
+		}
+
+		boolean conflict = existingPromotionsForTarget.stream().anyMatch(p -> !p.status.isTerminal());
+		if (conflict) {
+			throw new DuplicatePromotionInProgressError(applicationId, targetEnvironment);
+		}
+
+		return new Promotion(
+				id, applicationId, version, lastCompletedEnvironment, targetEnvironment, requestedBy,
+				PromotionStatus.REQUESTED);
+	}
+
+	/** Invariant #3: only an actor with the approver role may approve. */
+	public void approve(Actor approver) {
+		requireNotTerminal("ApprovePromotion");
+		if (status != PromotionStatus.REQUESTED) {
+			throw new InvalidTransitionError(status, "ApprovePromotion");
+		}
+		if (!approver.isApprover()) {
+			throw new UnauthorizedApproverError(approver.userId());
+		}
+		this.status = PromotionStatus.APPROVED;
+		this.approvedBy = approver;
+	}
+
+	public void startDeployment(Actor actor) {
+		requireNotTerminal("StartDeployment");
+		if (status != PromotionStatus.APPROVED) {
+			throw new InvalidTransitionError(status, "StartDeployment");
+		}
+		this.status = PromotionStatus.IN_PROGRESS;
+	}
+
+	public void complete(Actor actor) {
+		requireNotTerminal("CompletePromotion");
+		if (status != PromotionStatus.IN_PROGRESS) {
+			throw new InvalidTransitionError(status, "CompletePromotion");
+		}
+		this.status = PromotionStatus.COMPLETED;
+	}
+
+	public void rollback(Actor actor) {
+		requireNotTerminal("RollbackPromotion");
+		if (status != PromotionStatus.IN_PROGRESS) {
+			throw new InvalidTransitionError(status, "RollbackPromotion");
+		}
+		this.status = PromotionStatus.ROLLED_BACK;
+	}
+
+	/** Invariant #4/#5: cancellation is only possible before deployment has started. */
+	public void cancel(Actor actor) {
+		requireNotTerminal("CancelPromotion");
+		if (status != PromotionStatus.REQUESTED && status != PromotionStatus.APPROVED) {
+			throw new InvalidTransitionError(status, "CancelPromotion");
+		}
+		this.status = PromotionStatus.CANCELLED;
+	}
+
+	private void requireNotTerminal(String command) {
+		if (status.isTerminal()) {
+			throw new PromotionAlreadyTerminalError(status);
+		}
+	}
+
+	public PromotionId id() {
+		return id;
+	}
+
+	public ApplicationId applicationId() {
+		return applicationId;
+	}
+
+	public Version version() {
+		return version;
+	}
+
+	public Optional<Environment> fromEnvironment() {
+		return Optional.ofNullable(fromEnvironment);
+	}
+
+	public Environment targetEnvironment() {
+		return targetEnvironment;
+	}
+
+	public PromotionStatus status() {
+		return status;
+	}
+
+	public Actor requestedBy() {
+		return requestedBy;
+	}
+
+	public Optional<Actor> approvedBy() {
+		return Optional.ofNullable(approvedBy);
+	}
+}
+Edit Promotion.java
+Modified
+Edit Promotion.java
+Modified
+Now the output ports as empty interfaces.
+
+Update Todos
+
+Write domain value objects, PromotionStatus, Environment, Actor, DomainEvent
+
+Write domain error hierarchy
+
+Write Promotion aggregate with invariant-guarded transitions
+
+Write output ports as empty interfaces (Deployment, IssueTracker, Notification)
+
+Write and implement the input port called by HTTP adapters
+
+Write unit tests for aggregate logic and input port
+
+Add aggregate lifecycle description to README.md
+
+Run tests and confirm they pass
+Write DeploymentRef.java
+6 lines
+package com.releasepilot.domain.ports;
+
+/** Opaque reference to a triggered deployment, returned by {@link DeploymentPort}. */
+public record DeploymentRef(String value) {
+}
+Write DeploymentPort.java
+16 lines
+package com.releasepilot.domain.ports;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.Version;
+
+/**
+ * Output port: a capability the domain requires of the outside world to trigger a deployment.
+ * Implemented by an infrastructure adapter (e.g. an in-memory stub, or later a real CI/CD
+ * client); the domain and application layers depend only on this abstraction.
+ */
+public interface DeploymentPort {
+
+	DeploymentRef trigger(ApplicationId applicationId, Version version, Environment environment);
+}
+Write WorkItem.java
+6 lines
+package com.releasepilot.domain.ports;
+
+/** A work item (ticket) linked to an application version, as returned by {@link IssueTrackerPort}. */
+public record WorkItem(String id, String title, String url) {
+}
+Write IssueTrackerPort.java
+17 lines
+package com.releasepilot.domain.ports;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Version;
+
+import java.util.List;
+
+/**
+ * Output port: a capability the domain requires of the outside world to fetch the work items
+ * linked to an application version (e.g. for the promotion detail query or the release-notes
+ * agent). Implemented by an infrastructure adapter.
+ */
+public interface IssueTrackerPort {
+
+	List<WorkItem> getLinkedWorkItems(ApplicationId applicationId, Version version);
+}
+Write NotificationPort.java
+13 lines
+package com.releasepilot.domain.ports;
+
+import com.releasepilot.domain.promotion.DomainEvent;
+
+/**
+ * Output port: a capability the domain requires of the outside world to alert on terminal-state
+ * events (Completed, RolledBack, Cancelled). Implemented by an infrastructure adapter.
+ */
+public interface NotificationPort {
+
+	void notify(DomainEvent event);
+}
+Write PromotionCommandPort.java
+29 lines
+package com.releasepilot.application.commands;
+
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Version;
+
+/**
+ * Input port: the seam through which driving adapters (HTTP controllers) reach the write side.
+ * One method per command in the spec (§4); each loads/persists the {@code Promotion} aggregate
+ * and lets it enforce its own invariants, never re-implementing business rules here.
+ */
+public interface PromotionCommandPort {
+
+	PromotionId requestPromotion(
+			ApplicationId applicationId, Version version, Environment targetEnvironment, Actor requestedBy);
+
+	PromotionId approvePromotion(PromotionId promotionId, Actor approvedBy);
+
+	PromotionId startDeployment(PromotionId promotionId, Actor startedBy);
+
+	PromotionId completePromotion(PromotionId promotionId, Actor completedBy);
+
+	PromotionId rollbackPromotion(PromotionId promotionId, Actor rolledBackBy);
+
+	PromotionId cancelPromotion(PromotionId promotionId, Actor cancelledBy);
+}
+Write PromotionNotFoundException.java
+12 lines
+package com.releasepilot.application.commands;
+
+import com.releasepilot.domain.promotion.PromotionId;
+
+/** Raised when a command targets a {@code promotionId} that does not exist. */
+public final class PromotionNotFoundException extends RuntimeException {
+
+	public PromotionNotFoundException(PromotionId promotionId) {
+		super("No promotion found with id %s".formatted(promotionId.value()));
+	}
+}
+Write PromotionCommandService.java
+108 lines
+package com.releasepilot.application.commands;
+
+import com.releasepilot.domain.ports.DeploymentPort;
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.Promotion;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.PromotionStatus;
+import com.releasepilot.domain.promotion.Version;
+
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+/**
+ * Implementation of the {@link PromotionCommandPort} — the only port implemented in this layer.
+ * Loads the sibling promotions each invariant needs (§3.4), then lets the {@link Promotion}
+ * aggregate itself decide and guard every transition.
+ *
+ * <p>Holds promotions in memory pending the write-side persistence adapter (not yet built);
+ * swapping this store for a real repository is a constructor-level change, not a rewrite of
+ * the command logic.
+ */
+public class PromotionCommandService implements PromotionCommandPort {
+
+	private final DeploymentPort deploymentPort;
+	private final Map<PromotionId, Promotion> promotions = new ConcurrentHashMap<>();
+
+	public PromotionCommandService(DeploymentPort deploymentPort) {
+		this.deploymentPort = deploymentPort;
+	}
+
+	@Override
+	public PromotionId requestPromotion(
+			ApplicationId applicationId, Version version, Environment targetEnvironment, Actor requestedBy) {
+		Environment lastCompleted = lastCompletedEnvironment(applicationId, version);
+		List<Promotion> existingForTarget = promotionsFor(applicationId, targetEnvironment);
+		Promotion promotion = Promotion.request(
+				PromotionId.random(), applicationId, version, lastCompleted, targetEnvironment, requestedBy,
+				existingForTarget);
+		promotions.put(promotion.id(), promotion);
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId approvePromotion(PromotionId promotionId, Actor approvedBy) {
+		Promotion promotion = load(promotionId);
+		promotion.approve(approvedBy);
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId startDeployment(PromotionId promotionId, Actor startedBy) {
+		Promotion promotion = load(promotionId);
+		promotion.startDeployment(startedBy);
+		deploymentPort.trigger(promotion.applicationId(), promotion.version(), promotion.targetEnvironment());
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId completePromotion(PromotionId promotionId, Actor completedBy) {
+		Promotion promotion = load(promotionId);
+		promotion.complete(completedBy);
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId rollbackPromotion(PromotionId promotionId, Actor rolledBackBy) {
+		Promotion promotion = load(promotionId);
+		promotion.rollback(rolledBackBy);
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId cancelPromotion(PromotionId promotionId, Actor cancelledBy) {
+		Promotion promotion = load(promotionId);
+		promotion.cancel(cancelledBy);
+		return promotion.id();
+	}
+
+	private Promotion load(PromotionId promotionId) {
+		Promotion promotion = promotions.get(promotionId);
+		if (promotion == null) {
+			throw new PromotionNotFoundException(promotionId);
+		}
+		return promotion;
+	}
+
+	private List<Promotion> promotionsFor(ApplicationId applicationId, Environment targetEnvironment) {
+		return promotions.values().stream()
+				.filter(p -> p.applicationId().equals(applicationId) && p.targetEnvironment() == targetEnvironment)
+				.collect(Collectors.toList());
+	}
+
+	private Environment lastCompletedEnvironment(ApplicationId applicationId, Version version) {
+		return promotions.values().stream()
+				.filter(p -> p.applicationId().equals(applicationId)
+						&& p.version().equals(version)
+						&& p.status() == PromotionStatus.COMPLETED)
+				.map(Promotion::targetEnvironment)
+				.max(Comparator.comparingInt(Enum::ordinal))
+				.orElse(null);
+	}
+}
+That's just a null-safety warning from Eclipse's null analysis on method references, not an actual error — harmless. Now let's compile to make sure everything is consistent so far.
+
+Bash
+IN
+./mvnw -q compile 2>&1 | tail -100
+
+OUT
+(Bash completed with no output)
+Compiles cleanly. Now let's write the unit tests.
+
+Update Todos
+
+Write domain value objects, PromotionStatus, Environment, Actor, DomainEvent
+
+Write domain error hierarchy
+
+Write Promotion aggregate with invariant-guarded transitions
+
+Write output ports as empty interfaces (Deployment, IssueTracker, Notification)
+
+Write and implement the input port called by HTTP adapters
+
+Write unit tests for aggregate logic and input port
+
+Add aggregate lifecycle description to README.md
+
+Run tests and confirm they pass
+Write PromotionTest.java
+236 lines
+package com.releasepilot.domain.promotion;
+
+import com.releasepilot.domain.promotion.errors.DuplicatePromotionInProgressError;
+import com.releasepilot.domain.promotion.errors.EnvironmentSkippedError;
+import com.releasepilot.domain.promotion.errors.InvalidTransitionError;
+import com.releasepilot.domain.promotion.errors.PromotionAlreadyTerminalError;
+import com.releasepilot.domain.promotion.errors.UnauthorizedApproverError;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class PromotionTest {
+
+	private final ApplicationId applicationId = ApplicationId.random();
+	private final Version version = new Version("1.4.0");
+	private final Actor requester = new Actor("alice", Role.REQUESTER);
+	private final Actor approver = new Actor("bob", Role.APPROVER);
+
+	private Promotion requestedPromotion() {
+		return Promotion.request(
+				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of());
+	}
+
+	private Promotion approvedPromotion() {
+		Promotion promotion = requestedPromotion();
+		promotion.approve(approver);
+		return promotion;
+	}
+
+	private Promotion inProgressPromotion() {
+		Promotion promotion = approvedPromotion();
+		promotion.startDeployment(approver);
+		return promotion;
+	}
+
+	// --- RequestPromotion / invariant #1 (ordered pipeline, no skipping) ---
+
+	@Test
+	void requestingFirstHopIntoDevSucceedsWhenNothingCompletedYet() {
+		Promotion promotion = Promotion.request(
+				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of());
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.REQUESTED);
+		assertThat(promotion.fromEnvironment()).isEmpty();
+		assertThat(promotion.targetEnvironment()).isEqualTo(Environment.DEV);
+		assertThat(promotion.requestedBy()).isEqualTo(requester);
+	}
+
+	@Test
+	void requestingTheImmediateNextEnvironmentSucceeds() {
+		Promotion promotion = Promotion.request(
+				PromotionId.random(), applicationId, version, Environment.DEV, Environment.STAGING, requester,
+				List.of());
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.REQUESTED);
+		assertThat(promotion.fromEnvironment()).contains(Environment.DEV);
+		assertThat(promotion.targetEnvironment()).isEqualTo(Environment.STAGING);
+	}
+
+	@Test
+	void requestingProductionBeforeStagingIsCompletedIsRejected() {
+		assertThatThrownBy(() -> Promotion.request(
+				PromotionId.random(), applicationId, version, null, Environment.PRODUCTION, requester, List.of()))
+				.isInstanceOf(EnvironmentSkippedError.class);
+	}
+
+	@Test
+	void requestingBeyondProductionIsRejected() {
+		assertThatThrownBy(() -> Promotion.request(
+				PromotionId.random(), applicationId, version, Environment.PRODUCTION, Environment.PRODUCTION,
+				requester, List.of()))
+				.isInstanceOf(EnvironmentSkippedError.class);
+	}
+
+	// --- RequestPromotion / invariant #2 (one in-flight promotion per application+target) ---
+
+	@Test
+	void requestingWhileAnotherNonTerminalPromotionTargetsTheSameEnvironmentIsRejected() {
+		Promotion existing = requestedPromotion();
+
+		assertThatThrownBy(() -> Promotion.request(
+				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of(existing)))
+				.isInstanceOf(DuplicatePromotionInProgressError.class);
+	}
+
+	@Test
+	void requestingIsAllowedWhenAllPriorPromotionsForTheTargetAreTerminal() {
+		Promotion cancelled = requestedPromotion();
+		cancelled.cancel(requester);
+
+		Promotion promotion = Promotion.request(
+				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of(cancelled));
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.REQUESTED);
+	}
+
+	// --- ApprovePromotion / invariant #3 (only an approver may approve) ---
+
+	@Test
+	void approvingWithTheApproverRoleTransitionsToApproved() {
+		Promotion promotion = requestedPromotion();
+
+		promotion.approve(approver);
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.APPROVED);
+		assertThat(promotion.approvedBy()).contains(approver);
+	}
+
+	@Test
+	void approvingWithoutTheApproverRoleIsRejected() {
+		Promotion promotion = requestedPromotion();
+
+		assertThatThrownBy(() -> promotion.approve(requester))
+				.isInstanceOf(UnauthorizedApproverError.class);
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.REQUESTED);
+	}
+
+	@Test
+	void approvingAPromotionThatIsNotRequestedIsRejected() {
+		Promotion promotion = approvedPromotion();
+
+		assertThatThrownBy(() -> promotion.approve(approver))
+				.isInstanceOf(InvalidTransitionError.class);
+	}
+
+	// --- StartDeployment ---
+
+	@Test
+	void startingDeploymentFromApprovedTransitionsToInProgress() {
+		Promotion promotion = approvedPromotion();
+
+		promotion.startDeployment(approver);
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.IN_PROGRESS);
+	}
+
+	@Test
+	void startingDeploymentBeforeApprovalIsRejected() {
+		Promotion promotion = requestedPromotion();
+
+		assertThatThrownBy(() -> promotion.startDeployment(approver))
+				.isInstanceOf(InvalidTransitionError.class);
+	}
+
+	// --- CompletePromotion / RollbackPromotion ---
+
+	@Test
+	void completingAnInProgressPromotionTransitionsToCompleted() {
+		Promotion promotion = inProgressPromotion();
+
+		promotion.complete(approver);
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.COMPLETED);
+	}
+
+	@Test
+	void completingAPromotionThatHasNotStartedIsRejected() {
+		Promotion promotion = approvedPromotion();
+
+		assertThatThrownBy(() -> promotion.complete(approver))
+				.isInstanceOf(InvalidTransitionError.class);
+	}
+
+	@Test
+	void rollingBackAnInProgressPromotionTransitionsToRolledBack() {
+		Promotion promotion = inProgressPromotion();
+
+		promotion.rollback(approver);
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.ROLLED_BACK);
+	}
+
+	@Test
+	void rollingBackAPromotionThatHasNotStartedIsRejected() {
+		Promotion promotion = approvedPromotion();
+
+		assertThatThrownBy(() -> promotion.rollback(approver))
+				.isInstanceOf(InvalidTransitionError.class);
+	}
+
+	// --- CancelPromotion ---
+
+	@Test
+	void cancellingARequestedPromotionTransitionsToCancelled() {
+		Promotion promotion = requestedPromotion();
+
+		promotion.cancel(requester);
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.CANCELLED);
+	}
+
+	@Test
+	void cancellingAnApprovedPromotionTransitionsToCancelled() {
+		Promotion promotion = approvedPromotion();
+
+		promotion.cancel(requester);
+
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.CANCELLED);
+	}
+
+	@Test
+	void cancellingAPromotionAlreadyInProgressIsRejected() {
+		Promotion promotion = inProgressPromotion();
+
+		assertThatThrownBy(() -> promotion.cancel(requester))
+				.isInstanceOf(InvalidTransitionError.class);
+	}
+
+	// --- Invariant #4 (immutability after terminal state) ---
+
+	@Test
+	void everyCommandAgainstACompletedPromotionIsRejected() {
+		Promotion promotion = inProgressPromotion();
+		promotion.complete(approver);
+
+		assertThatThrownBy(() -> promotion.approve(approver)).isInstanceOf(PromotionAlreadyTerminalError.class);
+		assertThatThrownBy(() -> promotion.startDeployment(approver)).isInstanceOf(PromotionAlreadyTerminalError.class);
+		assertThatThrownBy(() -> promotion.complete(approver)).isInstanceOf(PromotionAlreadyTerminalError.class);
+		assertThatThrownBy(() -> promotion.rollback(approver)).isInstanceOf(PromotionAlreadyTerminalError.class);
+		assertThatThrownBy(() -> promotion.cancel(approver)).isInstanceOf(PromotionAlreadyTerminalError.class);
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.COMPLETED);
+	}
+
+	@Test
+	void everyCommandAgainstACancelledPromotionIsRejected() {
+		Promotion promotion = requestedPromotion();
+		promotion.cancel(requester);
+
+		assertThatThrownBy(() -> promotion.approve(approver)).isInstanceOf(PromotionAlreadyTerminalError.class);
+		assertThat(promotion.status()).isEqualTo(PromotionStatus.CANCELLED);
+	}
+}
+Now the input port service tests:
+
+Write PromotionCommandServiceTest.java
+109 lines
+package com.releasepilot.application.commands;
+
+import com.releasepilot.domain.ports.DeploymentPort;
+import com.releasepilot.domain.ports.DeploymentRef;
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Role;
+import com.releasepilot.domain.promotion.Version;
+import com.releasepilot.domain.promotion.errors.DuplicatePromotionInProgressError;
+import com.releasepilot.domain.promotion.errors.EnvironmentSkippedError;
+import com.releasepilot.domain.promotion.errors.UnauthorizedApproverError;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class PromotionCommandServiceTest {
+
+	@Mock
+	private DeploymentPort deploymentPort;
+
+	private PromotionCommandService service;
+
+	private final ApplicationId applicationId = ApplicationId.random();
+	private final Version version = new Version("1.4.0");
+	private final Actor requester = new Actor("alice", Role.REQUESTER);
+	private final Actor approver = new Actor("bob", Role.APPROVER);
+
+	@BeforeEach
+	void setUp() {
+		service = new PromotionCommandService(deploymentPort);
+	}
+
+	@Test
+	void requestPromotionThenApproveThenStartThenCompleteWalksTheHappyPath() {
+		when(deploymentPort.trigger(any(), any(), any())).thenReturn(new DeploymentRef("deploy-1"));
+
+		PromotionId id = service.requestPromotion(applicationId, version, Environment.DEV, requester);
+		service.approvePromotion(id, approver);
+		service.startDeployment(id, approver);
+		service.completePromotion(id, approver);
+
+		verify(deploymentPort).trigger(applicationId, version, Environment.DEV);
+	}
+
+	@Test
+	void requestingProductionBeforeStagingIsCompletedIsRejectedThroughThePort() {
+		assertThatThrownBy(() -> service.requestPromotion(applicationId, version, Environment.PRODUCTION, requester))
+				.isInstanceOf(EnvironmentSkippedError.class);
+	}
+
+	@Test
+	void requestingTheSameTargetTwiceWhileTheFirstIsStillInFlightIsRejected() {
+		service.requestPromotion(applicationId, version, Environment.DEV, requester);
+
+		assertThatThrownBy(() -> service.requestPromotion(applicationId, version, Environment.DEV, requester))
+				.isInstanceOf(DuplicatePromotionInProgressError.class);
+	}
+
+	@Test
+	void requestingAgainAfterCancellingTheFirstOneIsAllowed() {
+		PromotionId first = service.requestPromotion(applicationId, version, Environment.DEV, requester);
+		service.cancelPromotion(first, requester);
+
+		PromotionId second = service.requestPromotion(applicationId, version, Environment.DEV, requester);
+
+		assertThat(second).isNotEqualTo(first);
+	}
+
+	@Test
+	void completingAPromotionUnlocksTheNextEnvironmentForTheSameVersion() {
+		PromotionId devPromotion = service.requestPromotion(applicationId, version, Environment.DEV, requester);
+		service.approvePromotion(devPromotion, approver);
+		service.startDeployment(devPromotion, approver);
+		service.completePromotion(devPromotion, approver);
+
+		PromotionId stagingPromotion =
+				service.requestPromotion(applicationId, version, Environment.STAGING, requester);
+
+		assertThat(stagingPromotion).isNotNull();
+	}
+
+	@Test
+	void approvingWithoutTheApproverRoleIsRejectedThroughThePort() {
+		PromotionId id = service.requestPromotion(applicationId, version, Environment.DEV, requester);
+
+		assertThatThrownBy(() -> service.approvePromotion(id, requester))
+				.isInstanceOf(UnauthorizedApproverError.class);
+	}
+
+	@Test
+	void commandsAgainstAnUnknownPromotionAreRejected() {
+		PromotionId unknown = PromotionId.random();
+
+		assertThatThrownBy(() -> service.approvePromotion(unknown, approver))
+				.isInstanceOf(PromotionNotFoundException.class);
+	}
+}
+Now let's run the tests.
+
+Bash
+IN
+./mvnw -q test 2>&1 | tail -150
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+19:16:54.501 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:16:54.548 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+19:16:54.602 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:16:54.603 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-23T19:16:54.806+02:00  INFO 31029 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : Starting ReleasePilotApplicationTests using Java 21.0.11 with PID 31029 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-23T19:16:54.807+02:00  INFO 31029 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : No active profile set, falling back to 1 default profile: "default"
+2026-07-23T19:16:55.182+02:00  INFO 31029 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : Started ReleasePilotApplicationTests in 0.526 seconds (process running for 1.503)
+Bash
+IN
+grep -r "Tests run" /home/juanjo/git/agile-monkeys-test/target/surefire-reports/*.txt
+
+OUT
+/home/juanjo/git/agile-monkeys-test/target/surefire-reports/com.releasepilot.domain.promotion.PromotionTest.txt:Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in com.releasepilot.domain.promotion.PromotionTest
+/home/juanjo/git/agile-monkeys-test/target/surefire-reports/com.releasepilot.ReleasePilotApplicationTests.txt:Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.753 s -- in com.releasepilot.ReleasePilotApplicationTests
+/home/juanjo/git/agile-monkeys-test/target/surefire-reports/com.releasepilot.application.commands.PromotionCommandServiceTest.txt:Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.481 s -- in com.releasepilot.application.commands.PromotionCommandServiceTest
+All 28 tests pass (20 aggregate, 7 command-service, 1 context-load). Now let's add the aggregate lifecycle section to the README.
+
+Update Todos
+
+Write domain value objects, PromotionStatus, Environment, Actor, DomainEvent
+
+Write domain error hierarchy
+
+Write Promotion aggregate with invariant-guarded transitions
+
+Write output ports as empty interfaces (Deployment, IssueTracker, Notification)
+
+Write and implement the input port called by HTTP adapters
+
+Write unit tests for aggregate logic and input port
+
+Add aggregate lifecycle description to README.md
+
+Run tests and confirm they pass
+Edit README.md
+Added 44 lines
+Just spell-checker noise on proper nouns/acronyms already present in the file — not a real issue. Now let's re-run the full test suite once more to confirm everything still passes after all changes.
+
+Bash
+IN
+./mvnw -q clean test 2>&1 | tail -60; echo "---"; grep -r "Tests run" /home/juanjo/git/agile-monkeys-test/target/surefire-reports/*.txt
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+19:17:23.176 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:17:23.220 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+19:17:23.246 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:17:23.247 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-23T19:17:23.378+02:00  INFO 31545 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : Starting ReleasePilotApplicationTests using Java 21.0.11 with PID 31545 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-23T19:17:23.380+02:00  INFO 31545 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : No active profile set, falling back to 1 default profile: "default"
+2026-07-23T19:17:23.714+02:00  INFO 31545 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : Started ReleasePilotApplicationTests in 0.451 seconds (process running for 1.312)
+---
+/home/juanjo/git/agile-monkeys-test/target/surefire-reports/com.releasepilot.domain.promotion.PromotionTest.txt:Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.024 s -- in com.releasepilot.domain.promotion.PromotionTest
+/home/juanjo/git/agile-monkeys-test/target/surefire-reports/com.releasepilot.ReleasePilotApplicationTests.txt:Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.612 s -- in com.releasepilot.ReleasePilotApplicationTests
+/home/juanjo/git/agile-monkeys-test/target/surefire-reports/com.releasepilot.application.commands.PromotionCommandServiceTest.txt:Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.456 s -- in com.releasepilot.application.commands.PromotionCommandServiceTest
+All 28 tests pass on a clean build.
+
+Update Todos
+
+Write domain value objects, PromotionStatus, Environment, Actor, DomainEvent
+
+Write domain error hierarchy
+
+Write Promotion aggregate with invariant-guarded transitions
+
+Write output ports as empty interfaces (Deployment, IssueTracker, Notification)
+
+Write and implement the input port called by HTTP adapters
+
+Write unit tests for aggregate logic and input port
+
+Add aggregate lifecycle description to README.md
+
+Run tests and confirm they pass
+Summary of what was built:
+
+Domain layer (domain/promotion/): value objects (ApplicationId, PromotionId, Version, Environment, Actor, Role, PromotionStatus, DomainEvent), the Promotion aggregate (guards all 6 transitions + the 5 invariants from SPECS §3.3), and a sealed DomainError hierarchy (EnvironmentSkippedError, DuplicatePromotionInProgressError, UnauthorizedApproverError, InvalidTransitionError, PromotionAlreadyTerminalError).
+
+Ports (domain/ports/): DeploymentPort, IssueTrackerPort, NotificationPort written as empty interfaces only, no adapters yet.
+
+Input port (application/commands/): PromotionCommandPort (the seam HTTP controllers will call) implemented by PromotionCommandService — it fetches sibling promotions for the cross-instance invariants and otherwise defers entirely to the aggregate.
+
+Tests: 20 aggregate unit tests (every legal/illegal transition) + 7 service-level tests (Mockito for DeploymentPort). All 28 tests pass on a clean mvnw clean test run.
+
+README.md: added a "The Promotion aggregate lifecycle" section with the state diagram, guard table, and a note on why DeploymentPort/IssueTrackerPort/NotificationPort stay unimplemented for now.
+
+One judgment call worth flagging: SPECS.md doesn't name an explicit "input port" abstraction (only the 3 output ports in §6), so I introduced PromotionCommandPort as the one interface the future HTTP layer will depend on, backed by an in-memory store inside PromotionCommandService (no persistence infra exists yet). If you had a different shape in mind (e.g. per-command interfaces matching the application/commands/<verb>/ folder layout in SPECS §12), let me know and I'll restructure.
+
