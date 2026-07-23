@@ -35,9 +35,9 @@ CancelPromotion   → PromotionCancelled
 Read models shaped for the consumer, not the aggregate.
 
 ```
-GET /promotions/:id → detail + state history
-GET /applications/:id/status → state per environment
-GET /applications/:id/promotions → paged history
+GET /promotions/:id                      → detail + state history
+GET /applications/:id/status           → state per environment
+GET /applications/:id/promotions  → paged history
 ```
 
 ### D. Ports
@@ -45,9 +45,9 @@ GET /applications/:id/promotions → paged history
 The platform talks to external systems. Define them as ports and stub them in-memory, no real HTTP. Where you place these interfaces matters, and you'll be asked why.
 
 ```
-DeploymentPort   triggers a deployment
-IssueTrackerPort fetches linked work items
-NotificationPort alerts on terminal states
+DeploymentPort     triggers a deployment
+IssueTrackerPort    fetches linked work items
+NotificationPort     alerts on terminal states
 ```
 
 ### E. Events & Async Processing
