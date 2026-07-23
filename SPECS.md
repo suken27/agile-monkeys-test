@@ -80,17 +80,21 @@ Layered / hexagonal, with CQRS inside the write side:
 ```
 
 Key design decision: **ports live in the domain layer** (e.g.
-`domain/ports/DeploymentPort.ts`), because they represent capabilities the
+`domain/ports/DeploymentPort.java`), because they represent capabilities the
 domain *requires* of the outside world, expressed in domain language
 (`triggerDeployment(promotionId, environment)`), not infrastructure language
 (`POST /deploy`). Adapters (the in-memory stubs, and any future real client)
 live in `infrastructure/adapters/` and implement those interfaces. This keeps
 the dependency arrow pointing inward — the domain never imports
-infrastructure — and makes it trivial to swap a stub for a real HTTP client
-later without touching a single line of domain or application code. This is
-the question the exercise flags ("you'll be asked why") — the answer is
-dependency inversion: the domain defines the contract it needs, infrastructure
-fulfills it.
+infrastructure, and in particular never imports a Spring annotation — and
+makes it trivial to swap a stub for a real HTTP client later without touching
+a single line of domain or application code. This is the question the
+exercise flags ("you'll be asked why") — the answer is dependency inversion:
+the domain defines the contract it needs, infrastructure fulfills it. Spring
+wires the concrete adapter to the port interface via `@Bean`/`@Component` and
+constructor injection, but the domain module itself has zero Spring
+dependency — it is plain Java, which is also what keeps the aggregate unit
+tests in §14 free of any Spring context startup.
 
 ---
 
@@ -215,16 +219,16 @@ after the state transition succeeds (see §6).
 All events are immutable facts, versioned, and carry enough data for
 consumers to act without calling back into the write side:
 
-```ts
-interface DomainEvent {
-  eventId: string;        // uuid
-  eventType: string;       // "PromotionRequested" | ...
-  occurredAt: string;      // ISO timestamp
-  promotionId: string;
-  applicationId: string;
-  actingUser: string;
-  payload: Record<string, unknown>; // event-specific fields
-}
+```java
+public record DomainEvent(
+    UUID eventId,
+    String eventType,          // "PromotionRequested" | ...
+    Instant occurredAt,
+    UUID promotionId,
+    UUID applicationId,
+    String actingUser,
+    Map<String, Object> payload // event-specific fields
+) {}
 ```
 
 | Event | Extra payload |
@@ -363,67 +367,75 @@ violation has an explicit domain error class and never falls through to
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Language/runtime | TypeScript / Node.js | Fast to scaffold, strong typing for value objects/DDD, ubiquitous. |
-| HTTP framework | Express (or Fastify) | Kept deliberately minimal — thin controllers, no framework-driven CQRS magic, so the CQRS/DDD wiring is visible and hand-rolled rather than hidden in decorators. |
-| Command/Query bus | Hand-rolled in-process dispatcher | Demonstrates understanding of the pattern rather than delegating to a framework module. |
-| Database | PostgreSQL | Relational integrity for the write side + JSONB for event/read-model payloads; one engine for both write and read tables keeps `docker-compose.yml` minimal. |
-| Message queue | RabbitMQ | Literally a message queue (matches the brief precisely), simple docker image, simple ack/nack semantics for consumers. |
-| Migrations | node-pg-migrate or Knex migrations | Explicit, reviewable schema history. |
-| Tests | Vitest/Jest, aggregate unit tests with zero infra, handler tests against stub ports, a handful of API-level integration tests | Domain rules get fast, infra-free unit tests — the highest-value tests here. |
+| Language/runtime | Java 21 (LTS) | Records for value objects/events, sealed interfaces for exhaustive state/error modeling, pattern matching for the transition/error-mapping tables — strong typing for DDD with no extra language runtime to justify. |
+| Application framework | Spring Boot (Spring Web for the API, Spring Context for DI) | Wiring, config, and embedded server for free, but deliberately *not* used to drive the CQRS/DDD shape itself — no Axon Framework, no Spring Data REST, no `@Transactional`-driven magic inside the domain. Controllers are thin `@RestController`s that build a Command/Query and hand it to the bus; that keeps the CQRS/DDD wiring visible and hand-rolled rather than hidden behind framework annotations. |
+| Command/Query bus | Hand-rolled in-process dispatcher (plain Java, registered as a Spring bean at startup — not Axon's `CommandGateway`) | Demonstrates understanding of the pattern rather than delegating it to a framework module. |
+| Database | PostgreSQL | Relational integrity for the write side + `jsonb` for event/read-model payloads; one engine for both write and read tables keeps `docker-compose.yml` minimal. |
+| Persistence access | Spring Data JDBC (or plain `JdbcTemplate`) for the write side; the same for read-model projections | Deliberately not Spring Data JPA — the `Promotion` aggregate should not be a JPA entity with lazy proxies and identity-map surprises leaking into the domain layer; a repository that explicitly maps rows ↔ domain objects keeps the aggregate's invariants (§3.3) in full control of its own state. |
+| Message queue | RabbitMQ (via Spring AMQP / `spring-boot-starter-amqp`) | Literally a message queue (matches the brief precisely), simple docker image, simple ack/nack semantics for consumers, and Spring AMQP's `@RabbitListener` maps cleanly onto the consumer modules in §8 without pulling consumer logic into the command-handling call stack. |
+| Migrations | Flyway | Explicit, reviewable, versioned SQL schema history; first-class Spring Boot auto-configuration. |
+| Build tool | Maven | Ubiquitous, declarative, no build-script DSL to explain in a review — favors reviewability over Gradle's flexibility for an exercise of this size. |
+| Tests | JUnit 5 + AssertJ + Mockito; aggregate unit tests with zero Spring context; handler tests against stub ports; Testcontainers (Postgres + RabbitMQ) for the handful of API-level integration tests | Domain rules get fast, Spring-context-free unit tests — the highest-value tests here — while integration tests still exercise the real outbox → queue → consumer path via Testcontainers rather than mocks. |
 
-This is a proposal, not a constraint from the brief ("any backend stack you
-like") — flag now if you'd rather use a different language/framework (e.g.
-.NET, Kotlin, Go) and the rest of this document's structure still applies.
+This is a proposal within the brief's "any backend stack you like" — Java 21
+and Spring Boot per instruction; the rest of this document's DDD/CQRS/ports
+structure is unchanged and framework-agnostic by design, which is what makes
+swapping the stack a low-risk edit rather than a rewrite.
 
 ---
 
 ## 12. Suggested Project Structure
 
 ```
-src/
+src/main/java/com/releasepilot/
   domain/
     promotion/
-      Promotion.ts            # aggregate root
-      PromotionStatus.ts
-      Environment.ts
-      errors.ts                # domain error classes
+      Promotion.java             # aggregate root
+      PromotionStatus.java
+      Environment.java
+      errors/                    # domain error classes (sealed hierarchy)
     ports/
-      DeploymentPort.ts
-      IssueTrackerPort.ts
-      NotificationPort.ts
+      DeploymentPort.java
+      IssueTrackerPort.java
+      NotificationPort.java
   application/
     commands/
-      RequestPromotion/{Command.ts,Handler.ts}
-      ApprovePromotion/...
-      StartDeployment/...
-      CompletePromotion/...
-      RollbackPromotion/...
-      CancelPromotion/...
+      requestpromotion/{RequestPromotionCommand.java,RequestPromotionHandler.java}
+      approvepromotion/...
+      startdeployment/...
+      completepromotion/...
+      rollbackpromotion/...
+      cancelpromotion/...
     queries/
-      GetPromotionDetail/...
-      GetApplicationStatus/...
-      GetApplicationPromotions/...
+      getpromotiondetail/...
+      getapplicationstatus/...
+      getapplicationpromotions/...
   infrastructure/
     persistence/
-      PromotionRepository.ts    # write side
-      OutboxRepository.ts
-      readmodels/               # projector-maintained tables
+      PromotionRepository.java    # write side (Spring Data JDBC / JdbcTemplate)
+      OutboxRepository.java
+      readmodel/                  # projector-maintained tables
     adapters/
-      in-memory/
-        InMemoryDeploymentAdapter.ts
-        InMemoryIssueTrackerAdapter.ts
-        InMemoryNotificationAdapter.ts
+      inmemory/
+        InMemoryDeploymentAdapter.java
+        InMemoryIssueTrackerAdapter.java
+        InMemoryNotificationAdapter.java
     queue/
-      RabbitMqPublisher.ts
-      OutboxRelay.ts
+      RabbitMqPublisher.java
+      OutboxRelay.java
   consumers/
-    AuditLogConsumer.ts
-    ReadModelProjector.ts
-    NotificationConsumer.ts
-    ReleaseNotesAgentConsumer.ts   # optional
+    AuditLogConsumer.java
+    ReadModelProjector.java
+    NotificationConsumer.java
+    ReleaseNotesAgentConsumer.java   # optional
   api/
     controllers/
-    errorMapping.ts
+    ErrorMapping.java
+src/main/resources/
+  db/migration/                     # Flyway SQL migrations
+  application.yml
+src/test/java/com/releasepilot/...  # mirrors main, per §14
+pom.xml
 docker-compose.yml
 ```
 

@@ -1,0 +1,43 @@
+SPECS.md
+modify the specs file to use Java as the programming languaje, using the Spring framework, update the rest of the choices that depend on the languaje
+Read SPECS.md
+I'll update the spec to Java/Spring, including the tech stack table, file extensions in diagrams, the event schema example, and the project structure.
+
+Edit SPECS.md
+Added 4 lines
+Edit SPECS.md
+Modified
+Now the tech stack table (§11) — the biggest change:
+
+Edit SPECS.md
+Added 3 lines
+These are just spell-check informational hints on proper nouns/tech terms (AMQP, Mockito, Testcontainers, etc.) — not actual issues, ignoring and continuing to the project structure section.
+
+Edit SPECS.md
+Added 5 lines
+Just spell-check hints on package names, expected. Now updating §12's docker-compose section is fine as-is (no language-specific content). Let me check §13/§14/§15 and the intro for remaining TypeScript/Node references.
+
+Bash
+IN
+grep -n -iE "typescript|node\.js|\.ts\b|node-pg|knex|vitest|jest|express|fastify" /home/juanjo/git/agile-monkeys-test/SPECS.md
+
+OUT
+84:domain *requires* of the outside world, expressed in domain language
+371:| Application framework | Spring Boot (Spring Web for the API, Spring Context for DI) | Wiring, config, and embedded server for free, but deliberately *not* used to drive the CQRS/DDD shape itself — no Axon Framework, no Spring Data REST, no `@Transactional`-driven magic inside the domain. Controllers are thin `@RestController`s that build a Command/Query and hand it to the bus; that keeps the CQRS/DDD wiring visible and hand-rolled rather than hidden behind framework annotations, same intent as the original Express choice. |
+Read SPECS.md (lines 370-372)
+Edit SPECS.md
+Modified
+All references to TypeScript/Node/Express/Vitest are cleared. Let me verify §14 testing strategy and §15 open questions don't need language-specific tweaks, and do a final read-through of the changed sections.
+
+Read SPECS.md (lines 450-479)
+These sections are already language-agnostic and don't need changes. The spec is fully updated.
+
+Summary
+Updated SPECS.md to Java + Spring throughout:
+
+§2 Architecture: port file references now .java; added a note that the domain module has zero Spring dependency (plain Java), keeping aggregate unit tests free of Spring context startup.
+§5 Domain Events: the DomainEvent schema is now a Java record instead of a TS interface.
+§11 Tech Stack: full rewrite — Java 21, Spring Boot (Web + Context, explicitly not Axon/Spring Data REST, to keep CQRS hand-rolled), Spring Data JDBC/JdbcTemplate (not JPA, to keep the aggregate free of ORM proxies), RabbitMQ via Spring AMQP, Flyway for migrations, Maven as build tool, JUnit 5 + AssertJ + Mockito + Testcontainers for tests.
+§12 Project Structure: converted to a Maven src/main/java/com/releasepilot/... layout with pom.xml and Flyway migrations under src/main/resources/db/migration.
+Removed the old "flag now if you'd rather use .NET/Kotlin/Go" disclaimer since the language is now fixed.
+Everything else (DDD/CQRS/hexagonal design, invariants, commands, events, API surface, testing strategy, open questions) was already framework-agnostic and needed no changes.
