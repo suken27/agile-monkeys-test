@@ -1,0 +1,470 @@
+
+README.md#80-81
+add a github actions pipeline so: the unit tests are checked (if there is a failure the pipeline fails), the integration tests are checked (if there is a failure the pipeline fails), it checks that the project builds correctly. These actions must run on every commit , if a branch is merged to main, then another pipeline re-runs all the previous checks and builds a docker image that is sent to the github registry
+Bash
+IN
+find . -path ./target -prune -o -type f -print | grep -v '/.git/' | sort
+
+OUT
+./AI-chat-logs/001.txt
+./AI-chat-logs/002.txt
+./AI-chat-logs/003.txt
+./AI-chat-logs/004.txt
+./AI-chat-logs/005.txt
+./AI-chat-logs/006.txt
+./AI-chat-logs/007.txt
+./.claude/settings.local.json
+./.gitattributes
+./.gitignore
+./mvnw
+./mvnw.cmd
+./.mvn/wrapper/maven-wrapper.properties
+./originalDescription.md
+./pom.xml
+./README.md
+./SPECS.md
+./src/main/java/com/releasepilot/api/controllers/.gitkeep
+./src/main/java/com/releasepilot/application/commands/PromotionCommandPort.java
+./src/main/java/com/releasepilot/application/commands/PromotionCommandService.java
+./src/main/java/com/releasepilot/application/commands/PromotionNotFoundException.java
+./src/main/java/com/releasepilot/application/queries/.gitkeep
+./src/main/java/com/releasepilot/consumers/.gitkeep
+./src/main/java/com/releasepilot/domain/ports/DeploymentPort.java
+./src/main/java/com/releasepilot/domain/ports/DeploymentRef.java
+./src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java
+./src/main/java/com/releasepilot/domain/ports/NotificationPort.java
+./src/main/java/com/releasepilot/domain/ports/PromotionRepositoryPort.java
+./src/main/java/com/releasepilot/domain/ports/WorkItem.java
+./src/main/java/com/releasepilot/domain/promotion/Actor.java
+./src/main/java/com/releasepilot/domain/promotion/ApplicationId.java
+./src/main/java/com/releasepilot/domain/promotion/DomainEvent.java
+./src/main/java/com/releasepilot/domain/promotion/Environment.java
+./src/main/java/com/releasepilot/domain/promotion/errors/DomainError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/DuplicatePromotionInProgressError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/EnvironmentSkippedError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/InvalidTransitionError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/PromotionAlreadyTerminalError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/UnauthorizedApproverError.java
+./src/main/java/com/releasepilot/domain/promotion/PromotionId.java
+./src/main/java/com/releasepilot/domain/promotion/Promotion.java
+./src/main/java/com/releasepilot/domain/promotion/PromotionStatus.java
+./src/main/java/com/releasepilot/domain/promotion/Role.java
+./src/main/java/com/releasepilot/domain/promotion/Version.java
+./src/main/java/com/releasepilot/infrastructure/adapters/inmemory/.gitkeep
+./src/main/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepository.java
+./src/main/java/com/releasepilot/infrastructure/persistence/readmodel/.gitkeep
+./src/main/java/com/releasepilot/infrastructure/queue/.gitkeep
+./src/main/java/com/releasepilot/ReleasePilotApplication.java
+./src/main/resources/application.yml
+./src/main/resources/db/migration/V1__create_promotions_table.sql
+./src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+./src/test/java/com/releasepilot/domain/promotion/PromotionTest.java
+./src/test/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepositoryIT.java
+./src/test/java/com/releasepilot/ReleasePilotApplicationTests.java
+Read pom.xml
+Read README.md
+Bash
+IN
+find . -iname "Dockerfile*" -o -iname "*.dockerfile" 2>/dev/null | grep -v node_modules; find . -path ./.git -prune -o -iname "*.yml" -print -o -iname "*.yaml" -print | grep -v node_modules; ls -la .github 2>/dev/null
+
+OUT
+Exit code 2
+./target/classes/application.yml
+./src/main/resources/application.yml
+Bash
+IN
+grep -ni "docker\|github action\|ci\|pipeline\|registry" /home/juanjo/git/agile-monkeys-test/SPECS.md /home/juanjo/git/agile-monkeys-test/originalDescription.md 2>/dev/null | head -50
+
+OUT
+/home/juanjo/git/agile-monkeys-test/originalDescription.md:5:The domain is the whole point. Keep the API thin, model the Promotion as an aggregate that guards its own rules, and ship a docker-compose.yml that starts the database and message queue it needs.
+/home/juanjo/git/agile-monkeys-test/originalDescription.md:11:Environments form an ordered pipeline (dev → staging → production). A Promotion advances one application version exactly one step, and a version must complete each environment before the next, no skipping. Only one promotion may be in progress per application + target environment; only an approver may approve; once completed or cancelled a promotion is immutable. The aggregate guards these rules itself, violating one is a domain error, never a 500.
+/home/juanjo/git/agile-monkeys-test/SPECS.md:1:# ReleasePilot — Technical Specification
+/home/juanjo/git/agile-monkeys-test/SPECS.md:6:ordered pipeline of deployment environments (`dev → staging → production`). The
+/home/juanjo/git/agile-monkeys-test/SPECS.md:21:- Full command → event → async-consumer pipeline, including a persisted audit
+/home/juanjo/git/agile-monkeys-test/SPECS.md:27:  ports with in-memory stub adapters — no outbound HTTP in this exercise.
+/home/juanjo/git/agile-monkeys-test/SPECS.md:28:- A single `docker-compose.yml` that boots the database and the message
+/home/juanjo/git/agile-monkeys-test/SPECS.md:33:- Real integrations with a CI/CD system, issue tracker, or notification
+/home/juanjo/git/agile-monkeys-test/SPECS.md:82:Key design decision: **ports live in the domain layer** (e.g.
+/home/juanjo/git/agile-monkeys-test/SPECS.md:92:exercise flags ("you'll be asked why") — the answer is dependency inversion:
+/home/juanjo/git/agile-monkeys-test/SPECS.md:109:| Environment | A stage in the pipeline. Fixed, ordered: `dev`, `staging`, `production`. |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:110:| Promotion | A request/process to move one application version one step forward in the pipeline. The aggregate root. |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:126:| — | `RequestPromotion` | target env is the *immediate next* pipeline step after the version's current environment; no other non-terminal promotion exists for this `(applicationId, targetEnvironment)` | `Requested` | `PromotionRequested` |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:142:1. **Ordered pipeline, no skipping** — a promotion's `targetEnvironment` must
+/home/juanjo/git/agile-monkeys-test/SPECS.md:150:   §3.4 — but the *decision* of what counts as "in progress" and the refusal
+/home/juanjo/git/agile-monkeys-test/SPECS.md:172:...)`), so the *decision* is still made by the aggregate, but the *data
+/home/juanjo/git/agile-monkeys-test/SPECS.md:230:    Map<String, Object> payload // event-specific fields
+/home/juanjo/git/agile-monkeys-test/SPECS.md:268:satisfies the Dependency Inversion Principle, and means unit tests for the
+/home/juanjo/git/agile-monkeys-test/SPECS.md:270:adapters, which is also exactly what the exercise stub requirement rewards.
+/home/juanjo/git/agile-monkeys-test/SPECS.md:282:| `GET /applications/:id/status` | `application_environment_status` | `{ applicationId, environments: [{ environment, currentVersion, status, lastPromotionId }] }` per pipeline stage |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:293:handlers (each could run as its own process in production; in this exercise
+/home/juanjo/git/agile-monkeys-test/SPECS.md:295:`docker-compose`/app entrypoint, but must not share in-process call stacks
+/home/juanjo/git/agile-monkeys-test/SPECS.md:329:  4. (Mocked LLM decides, from tool results, whether it has enough context
+/home/juanjo/git/agile-monkeys-test/SPECS.md:357:Domain errors map to HTTP status via a small, explicit table (e.g.
+/home/juanjo/git/agile-monkeys-test/SPECS.md:361:violation has an explicit domain error class and never falls through to
+/home/juanjo/git/agile-monkeys-test/SPECS.md:373:| Database | PostgreSQL | Relational integrity for the write side + `jsonb` for event/read-model payloads; one engine for both write and read tables keeps `docker-compose.yml` minimal. |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:374:| Persistence access | Spring Data JDBC (or plain `JdbcTemplate`) for the write side; the same for read-model projections | Deliberately not Spring Data JPA — the `Promotion` aggregate should not be a JPA entity with lazy proxies and identity-map surprises leaking into the domain layer; a repository that explicitly maps rows ↔ domain objects keeps the aggregate's invariants (§3.3) in full control of its own state. |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:375:| Message queue | RabbitMQ (via Spring AMQP / `spring-boot-starter-amqp`) | Literally a message queue (matches the brief precisely), simple docker image, simple ack/nack semantics for consumers, and Spring AMQP's `@RabbitListener` maps cleanly onto the consumer modules in §8 without pulling consumer logic into the command-handling call stack. |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:376:| Migrations | Flyway | Explicit, reviewable, versioned SQL schema history; first-class Spring Boot auto-configuration. |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:377:| Build tool | Maven | Ubiquitous, declarative, no build-script DSL to explain in a review — favors reviewability over Gradle's flexibility for an exercise of this size. |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:378:| Tests | JUnit 5 + AssertJ + Mockito; aggregate unit tests with zero Spring context; handler tests against stub ports; Testcontainers (Postgres + RabbitMQ) for the handful of API-level integration tests | Domain rules get fast, Spring-context-free unit tests — the highest-value tests here — while integration tests still exercise the real outbox → queue → consumer path via Testcontainers rather than mocks. |
+/home/juanjo/git/agile-monkeys-test/SPECS.md:439:docker-compose.yml
+/home/juanjo/git/agile-monkeys-test/SPECS.md:444:## 13. docker-compose.yml (scope)
+/home/juanjo/git/agile-monkeys-test/SPECS.md:459:   direct test: legal transition succeeds, illegal one throws the specific
+/home/juanjo/git/agile-monkeys-test/SPECS.md:480:  exercise or as separate in-app workers — proposing the latter for
+/home/juanjo/git/agile-monkeys-test/SPECS.md:481:  simplicity, structured so extracting them into standalone processes later
+Bash
+IN
+find . -maxdepth 1 -iname "docker*"; find . -iname "docker-compose*" 2>/dev/null
+
+OUT
+(Bash completed with no output)
+Read .gitignore
+Bash
+IN
+ls -la /home/juanjo/git/agile-monkeys-test/.mvn/wrapper/ 2>/dev/null; cat /home/juanjo/git/agile-monkeys-test/.mvn/wrapper/maven-wrapper.properties 2>/dev/null; git -C /home/juanjo/git/agile-monkeys-test ls-files | grep -i mvn
+
+OUT
+total 12
+drwxr-xr-x 2 juanjo juanjo 4096 Jul 23 18:43 .
+drwxr-xr-x 3 juanjo juanjo 4096 Jul 23 18:43 ..
+-rw-r--r-- 1 juanjo juanjo  168 Jul 23 18:43 maven-wrapper.properties
+wrapperVersion=3.3.4
+distributionType=only-script
+distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.zip
+.mvn/wrapper/maven-wrapper.properties
+mvnw
+mvnw.cmd
+Now let me check the JdbcPromotionRepositoryIT test and application.yml to confirm the artifact name and any docker/testcontainers specifics.
+
+Bash
+IN
+cat /home/juanjo/git/agile-monkeys-test/src/main/resources/application.yml; echo ---; grep -n "artifactId\|version" /home/juanjo/git/agile-monkeys-test/pom.xml | head -5
+
+OUT
+spring:
+  application:
+    name: ReleasePilot
+---
+1:<?xml version="1.0" encoding="UTF-8"?>
+7:		<artifactId>spring-boot-starter-parent</artifactId>
+8:		<version>4.0.7</version>
+12:	<artifactId>releasepilot</artifactId>
+13:	<version>0.0.1-SNAPSHOT</version>
+Update Todos
+
+Create Dockerfile and .dockerignore
+
+Create CI workflow (build, unit tests, integration tests) on every commit
+
+Create main-branch workflow that reruns checks and publishes Docker image to GHCR
+
+Update README with CI/CD and Docker info
+Write Dockerfile
+23 lines
+# syntax=docker/dockerfile:1
+
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /app
+
+COPY .mvn/ .mvn/
+COPY mvnw pom.xml ./
+RUN ./mvnw -B dependency:go-offline
+
+COPY src ./src
+RUN ./mvnw -B clean package -DskipTests
+
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+
+RUN addgroup --system spring && adduser --system --ingroup spring spring
+USER spring:spring
+
+COPY --from=build /app/target/releasepilot-*.jar app.jar
+
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+Write .dockerignore
+12 lines
+target/
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+AI-chat-logs/
+HELP.md
+README.md
+SPECS.md
+originalDescription.md
+Now the CI workflow that runs on every commit:
+
+Bash
+IN
+mkdir -p /home/juanjo/git/agile-monkeys-test/.github/workflows
+
+OUT
+(Bash completed with no output)
+Bash
+IN
+git -C /home/juanjo/git/agile-monkeys-test ls-files -s mvnw
+
+OUT
+100755 bd8896bf2217b46faa0291585e01ac1a3441a958 0	mvnw
+Good, mvnw is already executable in git. Now the CI workflow:
+
+Write ci.yml
+60 lines
+name: CI
+
+on:
+  push:
+  workflow_call:
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build project
+        run: ./mvnw -B clean compile
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run unit tests
+        run: ./mvnw -B test
+
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Testcontainers pulls postgres:16-alpine and talks to the Docker
+      # daemon that ships pre-installed and running on GitHub-hosted runners.
+      - name: Run integration tests
+        run: ./mvnw -B verify
+Now the release workflow that re-runs checks on merge to main and publishes the Docker image to GHCR:
+
+Write release.yml
+50 lines
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  ci:
+    name: CI checks
+    uses: ./.github/workflows/ci.yml
+
+  docker:
+    name: Build and push Docker image
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+Read README.md (lines 45-58)
+Update Todos
+
+Create Dockerfile and .dockerignore
+
+Create CI workflow (build, unit tests, integration tests) on every commit
+
+Create main-branch workflow that reruns checks and publishes Docker image to GHCR
+
+Update README with CI/CD and Docker info
+Now I'll add a CI/CD section to the README, placed after the "Persistence integration tests" section since it references the same test commands:
+
+Edit README.md
+Added 15 lines
+Just spell-check hints on mvnw/Testcontainers, both intentional — no action needed.
+
+Update Todos
+
+Create Dockerfile and .dockerignore
+
+Create CI workflow (build, unit tests, integration tests) on every commit
+
+Create main-branch workflow that reruns checks and publishes Docker image to GHCR
+
+Update README with CI/CD and Docker info
+
+Validate YAML syntax and sanity-check locally
+Let me validate the YAML files and confirm the project still builds locally.
+
+Bash
+IN
+python3 -c "
+import yaml, sys
+for f in ['.github/workflows/ci.yml', '.github/workflows/release.yml']:
+    with open(f) as fh:
+        yaml.safe_load(fh)
+    print(f, 'OK')
+"
+
+OUT
+.github/workflows/ci.yml OK
+.github/workflows/release.yml OK
+Bash
+IN
+./mvnw -q -B clean compile 2>&1 | tail -50
+
+OUT
+(Bash completed with no output)
+Build succeeds. Let's verify unit tests run too:
+
+Bash
+IN
+./mvnw -B test 2>&1 | tail -60
+
+OUT
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ releasepilot ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ releasepilot ---
+[INFO] skip non existing resourceDirectory /home/juanjo/git/agile-monkeys-test/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ releasepilot ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 4 source files with javac [debug parameters release 21] to target/test-classes
+[INFO] /home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepositoryIT.java: /home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepositoryIT.java uses or overrides a deprecated API.
+[INFO] /home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepositoryIT.java: Recompile with -Xlint:deprecation for details.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ releasepilot ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.releasepilot.application.commands.PromotionCommandServiceTest
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.518 s -- in com.releasepilot.application.commands.PromotionCommandServiceTest
+[INFO] Running com.releasepilot.domain.promotion.PromotionTest
+[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.029 s -- in com.releasepilot.domain.promotion.PromotionTest
+[INFO] Running com.releasepilot.ReleasePilotApplicationTests
+17:27:10.582 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+17:27:10.624 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+17:27:10.650 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+17:27:10.651 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-25T17:27:10.773+02:00  INFO 47801 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : Starting ReleasePilotApplicationTests using Java 21.0.11 with PID 47801 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-25T17:27:10.774+02:00  INFO 47801 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : No active profile set, falling back to 1 default profile: "default"
+2026-07-25T17:27:11.141+02:00  INFO 47801 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : Started ReleasePilotApplicationTests in 0.473 seconds (process running for 1.424)
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.635 s -- in com.releasepilot.ReleasePilotApplicationTests
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 28, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  2.587 s
+[INFO] Finished at: 2026-07-25T17:27:11+02:00
+[INFO] ------------------------------------------------------------------------
+Unit tests pass locally with the exact commands the CI workflow uses. Let's check whether Docker is available here to sanity-check mvn verify and the Dockerfile build too.
+
+Bash
+IN
+docker info >/dev/null 2>&1 && echo "docker available" || echo "docker not available"
+
+OUT
+docker not available
+Update Todos
+
+Create Dockerfile and .dockerignore
+
+Create CI workflow (build, unit tests, integration tests) on every commit
+
+Create main-branch workflow that reruns checks and publishes Docker image to GHCR
+
+Update README with CI/CD and Docker info
+
+Validate YAML syntax and sanity-check locally
+Added:
+
+Dockerfile + .dockerignore — multi-stage build (JDK for build, JRE for runtime, non-root user), since none existed yet.
+.github/workflows/ci.yml — runs on every push, three independent jobs: build (mvnw clean compile), unit-tests (mvnw test), integration-tests (mvnw verify, using the Docker daemon already on GitHub-hosted runners for Testcontainers). Any job failing fails the pipeline.
+.github/workflows/release.yml — triggers on push to main (i.e. after a merge). It re-runs ci.yml in full via workflow_call, and only on success builds the Docker image and pushes it to ghcr.io/<owner>/<repo> tagged latest and sha-<commit>, using the built-in GITHUB_TOKEN (no extra secrets needed).
+Updated README.md with a short CI/CD section.
+Verified locally: ./mvnw clean compile and ./mvnw test both pass with the exact commands the workflow uses (28 unit tests green). I couldn't verify ./mvnw verify (Testcontainers) or the actual docker build here since Docker isn't available in this sandbox — worth a quick check on the first real CI run.
+

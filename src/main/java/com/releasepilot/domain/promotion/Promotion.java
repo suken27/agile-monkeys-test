@@ -88,6 +88,27 @@ public final class Promotion {
 				PromotionStatus.REQUESTED);
 	}
 
+	/**
+	 * Rehydrates a {@code Promotion} from persisted state. Unlike {@link #request}, this does not
+	 * re-run invariants #1/#2 — a persisted row already satisfied them when it was first written,
+	 * and re-checking here would require the adapter to pass in sibling promotions on every load,
+	 * not just on creation. Persistence adapters call this; nothing else should need to.
+	 */
+	public static Promotion reconstitute(
+			PromotionId id,
+			ApplicationId applicationId,
+			Version version,
+			Environment fromEnvironment,
+			Environment targetEnvironment,
+			Actor requestedBy,
+			PromotionStatus status,
+			Actor approvedBy) {
+		Promotion promotion =
+				new Promotion(id, applicationId, version, fromEnvironment, targetEnvironment, requestedBy, status);
+		promotion.approvedBy = approvedBy;
+		return promotion;
+	}
+
 	/** Invariant #3: only an actor with the approver role may approve. */
 	public void approve(Actor approver) {
 		requireNotTerminal();
