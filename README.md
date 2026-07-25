@@ -61,6 +61,50 @@ java -jar target/releasepilot-0.0.1-SNAPSHOT.jar
 ./mvnw test
 ```
 
+## The `Promotion` aggregate lifecycle
+
+A `Promotion` moves one application version one step through the pipeline
+(`dev → staging → production`). Every transition is a guarded method on the
+aggregate itself — illegal transitions raise a domain error rather than
+silently mutating state or throwing an uncaught exception.
+
+```
+Requested ──approve──▶ Approved ──start──▶ InProgress ──complete──▶ Completed
+    │                      │                    │
+    │                      │                    └──rollback──▶ RolledBack
+    │                      │
+    └──────cancel──────────┴──────cancel────────▶ Cancelled
+```
+
+| State | Reached via | Guards enforced on entry |
+|---|---|---|
+| `Requested` | `Promotion.request(...)` | target environment is the immediate next step after the version's last completed environment (no skipping); no other non-terminal promotion already targets the same `(application, environment)` pair |
+| `Approved` | `approve(actor)` | promotion is not terminal and is currently `Requested`; `actor` holds the `approver` role |
+| `InProgress` | `startDeployment(actor)` | promotion is not terminal and is currently `Approved` |
+| `Completed` *(terminal)* | `complete(actor)` | promotion is not terminal and is currently `InProgress` |
+| `RolledBack` *(terminal)* | `rollback(actor)` | promotion is not terminal and is currently `InProgress` |
+| `Cancelled` *(terminal)* | `cancel(actor)` | promotion is not terminal and is currently `Requested` or `Approved` |
+
+Once a promotion reaches a terminal state (`Completed`, `RolledBack`,
+`Cancelled`) every subsequent command is rejected with
+`PromotionAlreadyTerminalError` — no field on a terminal promotion can change.
+Any other out-of-order command (e.g. approving a promotion that is already
+`Approved`) is rejected with `InvalidTransitionError`. Both are domain errors
+(`domain/promotion/errors/`), never uncaught exceptions.
+
+Checking the "no skipping" and "no duplicate in-flight promotion" invariants
+requires knowledge of sibling `Promotion` instances for the same application,
+so the application layer (`PromotionCommandService`, the implementation of
+the `PromotionCommandPort` input port) fetches that sibling data and passes
+it into `Promotion.request(...)` — but the aggregate itself still makes the
+decision and throws the domain error if a rule is violated.
+
+`DeploymentPort`, `IssueTrackerPort`, and `NotificationPort`
+(`domain/ports/`) are the domain's output ports: capabilities it requires of
+the outside world, defined here as plain interfaces with no implementation
+yet — infrastructure adapters (in-memory stubs, later real clients) are a
+separate concern layered on top.
+
 ## Project structure
 
 ```

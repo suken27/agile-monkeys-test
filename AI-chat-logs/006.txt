@@ -1,0 +1,115 @@
+
+Promotion.java#79-79
+@src/main/java/com/releasepilot/domain/promotion/Promotion.java on request(...), why provide all existing promotions for a target environment, if we only care about the ones that are not in a terminal state?
+Read PromotionRepositoryPort.java
+Read PromotionCommandService.java
+Read PromotionStatus.java
+Good catch — passing the full list is the wrong call, and it actually contradicts the codebase's own stated design.
+
+Look at PromotionRepositoryPort.java:12-16: the port's class javadoc says "Filtering for the invariants... is the implementing adapter's responsibility, not the caller's — the port exposes exactly the queries those invariants need, already scoped." But findByApplicationAndTargetEnvironment at line 25 is documented as "Every known promotion for this pair" — not scoped at all. Then Promotion.request at Promotion.java:79 does the !p.status.isTerminal() filtering itself. So the actual behavior contradicts what the port claims to guarantee.
+
+There's a real design tension underneath:
+
+Precedent for adapter-side filtering already exists: findLastCompletedEnvironment (port line 28) already returns an aggregate/filtered result, not raw rows. Terminal-ness is domain vocabulary (PromotionStatus.isTerminal()), so an adapter query like WHERE status NOT IN (COMPLETED, ROLLED_BACK, CANCELLED) isn't reinventing business logic — it's just consuming the existing enum. That would make findByApplicationAndTargetEnvironment (or a renamed findActivePromotionsForTarget) actually match its class-level contract, and it's more efficient — no need to drag in every historical completed/cancelled promotion just to check for one active conflict.
+Counter-argument for keeping the filter in request(): Promotion's own class javadoc (lines 15-16) says it "guards every business rule... no repository, handler, or API layer can bypass an invariant enforced here" — i.e., don't trust the adapter to have filtered correctly. If the adapter's query is ever wrong, a defense-in-depth check in the domain catches it.
+My recommendation: pre-filter in the adapter for efficiency (rename the port method to reflect that it returns only non-terminal promotions, and fix its javadoc), but keep a cheap invariant check in the domain — just simplify it to !existingPromotionsForTarget.isEmpty() rather than dropping the check entirely. That gets you both the efficiency win and the "domain doesn't blindly trust the adapter" property, without fetching data you'll never use.
+
+Want me to make that change (port method + javadoc + service call + simplify the check in request())?
+
+do it
+Bash
+IN
+grep -rln "findByApplicationAndTargetEnvironment\|existingPromotionsForTarget\|existingForTarget" /home/juanjo/git/agile-monkeys-test/src
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/Promotion.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/PromotionRepositoryPort.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands/PromotionCommandService.java
+Bash
+IN
+grep -n "findByApplicationAndTargetEnvironment\|existingPromotionsForTarget\|existingForTarget\|class.*RepositoryPort\|implements PromotionRepositoryPort" -r /home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java:79:		when(repository.findByApplicationAndTargetEnvironment(applicationId, Environment.DEV))
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java:93:		when(repository.findByApplicationAndTargetEnvironment(applicationId, Environment.DEV))
+Bash
+IN
+grep -rln "implements PromotionRepositoryPort" /home/juanjo/git/agile-monkeys-test/src; find /home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/domain -type f
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/domain/promotion/PromotionTest.java
+Read PromotionCommandServiceTest.java (lines 61-105)
+Bash
+IN
+grep -n "existingPromotionsForTarget\|List.of\|List<Promotion>\|request(" /home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/domain/promotion/PromotionTest.java | head -60
+
+OUT
+23:		return Promotion.request(
+24:				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of());
+43:		Promotion promotion = Promotion.request(
+44:				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of());
+54:		Promotion promotion = Promotion.request(
+56:				List.of());
+65:		assertThatThrownBy(() -> Promotion.request(
+66:				PromotionId.random(), applicationId, version, null, Environment.PRODUCTION, requester, List.of()))
+72:		assertThatThrownBy(() -> Promotion.request(
+74:				requester, List.of()))
+84:		assertThatThrownBy(() -> Promotion.request(
+85:				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of(existing)))
+94:		Promotion promotion = Promotion.request(
+95:				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of(cancelled));
+I'll make the change, but with one adjustment: I looked at PromotionTest.java:84-95 and there's an existing test that calls Promotion.request() directly with a cancelled (terminal) promotion in the list and asserts it's allowed. That's the aggregate's own class javadoc promise in action — "no repository, handler, or API layer can bypass an invariant enforced here" — the domain deliberately doesn't trust the caller to have filtered. Dropping to a plain isEmpty() check would break that test and remove real defense-in-depth for one that's currently untested at the infrastructure layer (there's no adapter implementation yet).
+
+So I'll keep Promotion.request()'s own isTerminal() filter as-is, and just fix the actual inconsistency: the port's contract. I'll rename/re-document the query method so it honestly promises what its class javadoc already claims — scoped to active promotions — which is what should drive an efficient query once an adapter exists.
+
+Edit PromotionRepositoryPort.java
+Added 4 lines
+Edit PromotionCommandService.java
+Modified
+Read PromotionCommandServiceTest.java (lines 2-31)
+Now updating the two test call sites that mock the old method name.
+
+Edit PromotionCommandServiceTest.java
+Modified
+Edit PromotionCommandServiceTest.java
+Modified
+Read PromotionCommandServiceTest.java (lines 87-100)
+Now let's tighten up the javadoc in Promotion.java to reflect that the adapter is expected to pre-scope this, while the domain still double-checks defensively.
+
+Edit Promotion.java
+Added 2 lines
+Now let's compile and run the tests to confirm nothing broke.
+
+Bash
+IN
+./mvnw -q test 2>&1 | tail -80
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+19:50:41.943 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:50:41.984 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+19:50:42.010 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:50:42.010 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-23T19:50:42.138+02:00  INFO 44869 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : Starting ReleasePilotApplicationTests using Java 21.0.11 with PID 44869 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-23T19:50:42.139+02:00  INFO 44869 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : No active profile set, falling back to 1 default profile: "default"
+2026-07-23T19:50:42.490+02:00  INFO 44869 --- [ReleasePilot] [           main] c.r.ReleasePilotApplicationTests         : Started ReleasePilotApplicationTests in 0.465 seconds (process running for 1.369)
+All tests pass. Build is green with no other references to the old method name.
+
+Summary: renamed PromotionRepositoryPort.findByApplicationAndTargetEnvironment → findActivePromotionsForTarget, fixed its javadoc to actually promise what the port's class-level doc already claimed (adapter scopes to non-terminal promotions), updated the service and test mocks accordingly, and clarified Promotion.request()'s param doc to explain it still re-checks status itself as a defensive backstop rather than trusting the adapter's scoping — kept that check intact since PromotionTest.java:94-95 already exercises it directly and it matches the aggregate's own "no layer can bypass an invariant enforced here" guarantee.
+
