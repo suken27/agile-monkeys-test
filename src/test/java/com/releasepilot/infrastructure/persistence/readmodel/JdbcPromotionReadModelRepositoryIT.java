@@ -97,7 +97,7 @@ class JdbcPromotionReadModelRepositoryIT {
 		assertThat(detail.status()).isEqualTo(PromotionStatus.APPROVED);
 		assertThat(detail.requestedBy()).isEqualTo("alice");
 		assertThat(detail.approvedBy()).isEqualTo("bob");
-		assertThat(detail.history()).extracting(PromotionDetail.PromotionHistoryEntry::status)
+		assertThat(detail.history()).extracting(promDetail -> promDetail.status())
 				.containsExactly(PromotionStatus.REQUESTED, PromotionStatus.APPROVED);
 	}
 
@@ -107,7 +107,7 @@ class JdbcPromotionReadModelRepositoryIT {
 	void findApplicationEnvironmentStatusAlwaysReturnsAllThreeEnvironments() {
 		ApplicationEnvironmentStatus status = repository.findApplicationEnvironmentStatus(applicationId);
 
-		assertThat(status.environments()).extracting(ApplicationEnvironmentStatus.EnvironmentStatus::environment)
+		assertThat(status.environments()).extracting(stat -> stat.environment())
 				.containsExactly(Environment.DEV, Environment.STAGING, Environment.PRODUCTION);
 		assertThat(status.environments()).allSatisfy(env -> assertThat(env.status()).isNull());
 	}
