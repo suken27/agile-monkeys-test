@@ -91,7 +91,7 @@ class OutboxRelayIT {
 		RabbitAdmin admin = new RabbitAdmin(connectionFactory);
 		FanoutExchange exchange = new FanoutExchange(OutboxRelay.PROMOTION_EVENTS_EXCHANGE);
 		admin.declareExchange(exchange);
-		testQueue = new Queue("test.promotion-events." + UUID.randomUUID(), false, false, true);
+		testQueue = new Queue("test.promotion-events." + UUID.randomUUID(), false, false, false);
 		admin.declareQueue(testQueue);
 		Binding binding = BindingBuilder.bind(testQueue).to(exchange);
 		admin.declareBinding(binding);
