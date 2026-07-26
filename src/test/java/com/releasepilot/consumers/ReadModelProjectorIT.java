@@ -101,7 +101,7 @@ class ReadModelProjectorIT {
 		assertThat(detail.status()).isEqualTo(PromotionStatus.COMPLETED);
 		assertThat(detail.requestedBy()).isEqualTo("alice");
 		assertThat(detail.approvedBy()).isEqualTo("bob");
-		assertThat(detail.history()).extracting(PromotionDetail.PromotionHistoryEntry::status).containsExactly(
+		assertThat(detail.history()).extracting(promDetail -> promDetail.status()).containsExactly(
 				PromotionStatus.REQUESTED, PromotionStatus.APPROVED, PromotionStatus.IN_PROGRESS,
 				PromotionStatus.COMPLETED);
 
@@ -128,7 +128,7 @@ class ReadModelProjectorIT {
 
 		PromotionDetail detail = readModel.findPromotionDetail(promotionId).orElseThrow();
 		assertThat(detail.status()).isEqualTo(PromotionStatus.CANCELLED);
-		assertThat(detail.history()).extracting(PromotionDetail.PromotionHistoryEntry::status).containsExactly(
+		assertThat(detail.history()).extracting(promDetail -> promDetail.status()).containsExactly(
 				PromotionStatus.REQUESTED, PromotionStatus.CANCELLED);
 
 		var dev = readModel.findApplicationEnvironmentStatus(applicationId).environments().stream()
