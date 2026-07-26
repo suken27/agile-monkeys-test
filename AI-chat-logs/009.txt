@@ -1,0 +1,417 @@
+README.md
+create a docker compose file that deploys the application together with all required components for local testing, this is the URL that contains the docker image of the application ghcr.io/suken27/agile-monkeys-test, always use the latest version
+Bash
+IN
+find . -maxdepth 3 -not -path '*/node_modules/*' -not -path '*/.git/*' | sort
+
+OUT
+.
+./AI-chat-logs
+./AI-chat-logs/001.txt
+./AI-chat-logs/002.txt
+./AI-chat-logs/003.txt
+./AI-chat-logs/004.txt
+./AI-chat-logs/005.txt
+./AI-chat-logs/006.txt
+./AI-chat-logs/007.txt
+./AI-chat-logs/008.txt
+./.claude
+./.claude/settings.local.json
+./Dockerfile
+./.dockerignore
+./.git
+./.gitattributes
+./.github
+./.github/workflows
+./.github/workflows/ci.yml
+./.github/workflows/release.yml
+./.gitignore
+./.mvn
+./mvnw
+./mvnw.cmd
+./.mvn/wrapper
+./.mvn/wrapper/maven-wrapper.properties
+./originalDescription.md
+./pom.xml
+./README.md
+./SPECS.md
+./src
+./src/main
+./src/main/java
+./src/main/resources
+./src/test
+./src/test/java
+./target
+./target/classes
+./target/classes/application.yml
+./target/classes/com
+./target/classes/db
+./target/generated-sources
+./target/generated-sources/annotations
+./target/generated-test-sources
+./target/generated-test-sources/test-annotations
+./target/maven-status
+./target/maven-status/maven-compiler-plugin
+./target/surefire-reports
+./target/surefire-reports/com.releasepilot.application.commands.PromotionCommandServiceTest.txt
+./target/surefire-reports/com.releasepilot.domain.promotion.PromotionTest.txt
+./target/surefire-reports/com.releasepilot.ReleasePilotApplicationTests.txt
+./target/surefire-reports/TEST-com.releasepilot.application.commands.PromotionCommandServiceTest.xml
+./target/surefire-reports/TEST-com.releasepilot.domain.promotion.PromotionTest.xml
+./target/surefire-reports/TEST-com.releasepilot.ReleasePilotApplicationTests.xml
+./target/test-classes
+./target/test-classes/com
+Read README.md
+Bash
+IN
+find src/main/resources -type f | sort
+
+OUT
+src/main/resources/application.yml
+src/main/resources/db/migration/V1__create_promotions_table.sql
+Read pom.xml
+Read Dockerfile
+Read application.yml
+Bash
+IN
+grep -rn "DataSourceAutoConfiguration\|SpringBootApplication" src/main/java --include=*.java
+
+OUT
+src/main/java/com/releasepilot/ReleasePilotApplication.java:4:import org.springframework.boot.autoconfigure.SpringBootApplication;
+src/main/java/com/releasepilot/ReleasePilotApplication.java:5:import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
+src/main/java/com/releasepilot/ReleasePilotApplication.java:14:@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
+Bash
+IN
+grep -n -i "postgres\|docker-compose\|compose\|database\|env\|port" SPECS.md | head -80
+
+OUT
+6:ordered pipeline of deployment environments (`dev → staging → production`). The
+27:  ports with in-memory stub adapters — no outbound HTTP in this exercise.
+28:- A single `docker-compose.yml` that boots the database and the message
+67:         │  Ports (interfaces only)   │
+78: (persists   (updates        (stub port,          agent consumer
+82:Key design decision: **ports live in the domain layer** (e.g.
+83:`domain/ports/DeploymentPort.java`), because they represent capabilities the
+85:(`triggerDeployment(promotionId, environment)`), not infrastructure language
+88:the dependency arrow pointing inward — the domain never imports
+89:infrastructure, and in particular never imports a Spring annotation — and
+94:wires the concrete adapter to the port interface via `@Bean`/`@Component` and
+109:| Environment | A stage in the pipeline. Fixed, ordered: `dev`, `staging`, `production`. |
+126:| — | `RequestPromotion` | target env is the *immediate next* pipeline step after the version's current environment; no other non-terminal promotion exists for this `(applicationId, targetEnvironment)` | `Requested` | `PromotionRequested` |
+136:`UnauthorizedApproverError`, `EnvironmentSkippedError`,
+142:1. **Ordered pipeline, no skipping** — a promotion's `targetEnvironment` must
+143:   be the environment immediately following the version's last *completed*
+144:   environment. Requesting `production` before `staging` is completed is
+146:2. **One in-flight promotion per (application, target environment)** — enforced
+159:   environments in one command; each hop is its own `Promotion` instance/row
+165:*one* hop between two adjacent environments. Invariant #1 (must complete
+166:prior environment) and #2 (no duplicate in-flight promotion for the same
+171:`Promotion.request(previousEnvironmentState, existingPromotionsForTarget,
+182:- `Environment` — enum `dev | staging | production`, with a total order and
+195:| `RequestPromotion` | `applicationId, version, targetEnvironment, requestedBy` | `PromotionRequested` |
+212:`StartDeployment`'s handler additionally calls `DeploymentPort.trigger(...)`
+236:| `PromotionRequested` | `version, fromEnvironment, targetEnvironment` |
+238:| `DeploymentStarted` | `deploymentRef` (from `DeploymentPort`) |
+255:## 6. Ports (hexagonal boundaries)
+257:Defined as interfaces in `domain/ports/`, implemented as in-memory stubs in
+260:| Port | Method(s) | Used by | Stub behavior |
+262:| `DeploymentPort` | `trigger(applicationId, version, environment): DeploymentRef` | `StartDeployment` handler | Returns a fake `deploymentRef`, records the call in memory for test assertions. |
+263:| `IssueTrackerPort` | `getLinkedWorkItems(applicationId, version): WorkItem[]` | Query side (promotion detail) and/or release-notes agent | Returns a canned/seeded list of fake tickets. |
+264:| `NotificationPort` | `notify(event: DomainEvent): void` | Notification consumer, on terminal-state events | Logs/records the notification in memory. |
+269:domain never need a real broker, HTTP mock, or database — just the stub
+281:| `GET /promotions/:id` | `promotion_detail` | `{ id, applicationId, version, fromEnvironment, targetEnvironment, status, requestedBy, approvedBy?, history: [{status, actor, occurredAt}] }` |
+282:| `GET /applications/:id/status` | `application_environment_status` | `{ applicationId, environments: [{ environment, currentVersion, status, lastPromotionId }] }` per pipeline stage |
+283:| `GET /applications/:id/promotions` | `promotion_history` (paged) | `{ items: [{ id, version, fromEnvironment, targetEnvironment, status, requestedAt, completedAt? }], page, pageSize, total }` |
+295:`docker-compose`/app entrypoint, but must not share in-process call stacks
+305:   `application_environment_status`, `promotion_history` tables per event.
+306:3. **Notification consumer** — calls `NotificationPort.notify(...)` on
+326:     → backed by IssueTrackerPort stub.
+358:`InvalidTransitionError → 409`, `EnvironmentSkippedError → 422`,
+373:| Database | PostgreSQL | Relational integrity for the write side + `jsonb` for event/read-model payloads; one engine for both write and read tables keeps `docker-compose.yml` minimal. |
+378:| Tests | JUnit 5 + AssertJ + Mockito; aggregate unit tests with zero Spring context; handler tests against stub ports; Testcontainers (Postgres + RabbitMQ) for the handful of API-level integration tests | Domain rules get fast, Spring-context-free unit tests — the highest-value tests here — while integration tests still exercise the real outbox → queue → consumer path via Testcontainers rather than mocks. |
+381:and Spring Boot per instruction; the rest of this document's DDD/CQRS/ports
+395:      Environment.java
+397:    ports/
+398:      DeploymentPort.java
+399:      IssueTrackerPort.java
+400:      NotificationPort.java
+439:docker-compose.yml
+444:## 13. docker-compose.yml (scope)
+447:- `postgres` — with a seeded volume/init script for schema.
+461:2. **Command handler tests** — using in-memory repository + stub ports,
+Let's see the full docker-compose scope section from SPECS.md.
+
+Bash
+IN
+sed -n '360,470p' SPECS.md
+
+OUT
+and truly unexpected is a `500`, but every *documented business rule*
+violation has an explicit domain error class and never falls through to
+`500`.
+
+---
+
+## 11. Tech Stack (proposed)
+
+| Concern | Choice | Rationale |
+|---|---|---|
+| Language/runtime | Java 21 (LTS) | Records for value objects/events, sealed interfaces for exhaustive state/error modeling, pattern matching for the transition/error-mapping tables — strong typing for DDD with no extra language runtime to justify. |
+| Application framework | Spring Boot (Spring Web for the API, Spring Context for DI) | Wiring, config, and embedded server for free, but deliberately *not* used to drive the CQRS/DDD shape itself — no Axon Framework, no Spring Data REST, no `@Transactional`-driven magic inside the domain. Controllers are thin `@RestController`s that build a Command/Query and hand it to the bus; that keeps the CQRS/DDD wiring visible and hand-rolled rather than hidden behind framework annotations. |
+| Command/Query bus | Hand-rolled in-process dispatcher (plain Java, registered as a Spring bean at startup — not Axon's `CommandGateway`) | Demonstrates understanding of the pattern rather than delegating it to a framework module. |
+| Database | PostgreSQL | Relational integrity for the write side + `jsonb` for event/read-model payloads; one engine for both write and read tables keeps `docker-compose.yml` minimal. |
+| Persistence access | Spring Data JDBC (or plain `JdbcTemplate`) for the write side; the same for read-model projections | Deliberately not Spring Data JPA — the `Promotion` aggregate should not be a JPA entity with lazy proxies and identity-map surprises leaking into the domain layer; a repository that explicitly maps rows ↔ domain objects keeps the aggregate's invariants (§3.3) in full control of its own state. |
+| Message queue | RabbitMQ (via Spring AMQP / `spring-boot-starter-amqp`) | Literally a message queue (matches the brief precisely), simple docker image, simple ack/nack semantics for consumers, and Spring AMQP's `@RabbitListener` maps cleanly onto the consumer modules in §8 without pulling consumer logic into the command-handling call stack. |
+| Migrations | Flyway | Explicit, reviewable, versioned SQL schema history; first-class Spring Boot auto-configuration. |
+| Build tool | Maven | Ubiquitous, declarative, no build-script DSL to explain in a review — favors reviewability over Gradle's flexibility for an exercise of this size. |
+| Tests | JUnit 5 + AssertJ + Mockito; aggregate unit tests with zero Spring context; handler tests against stub ports; Testcontainers (Postgres + RabbitMQ) for the handful of API-level integration tests | Domain rules get fast, Spring-context-free unit tests — the highest-value tests here — while integration tests still exercise the real outbox → queue → consumer path via Testcontainers rather than mocks. |
+
+This is a proposal within the brief's "any backend stack you like" — Java 21
+and Spring Boot per instruction; the rest of this document's DDD/CQRS/ports
+structure is unchanged and framework-agnostic by design, which is what makes
+swapping the stack a low-risk edit rather than a rewrite.
+
+---
+
+## 12. Suggested Project Structure
+
+```
+src/main/java/com/releasepilot/
+  domain/
+    promotion/
+      Promotion.java             # aggregate root
+      PromotionStatus.java
+      Environment.java
+      errors/                    # domain error classes (sealed hierarchy)
+    ports/
+      DeploymentPort.java
+      IssueTrackerPort.java
+      NotificationPort.java
+  application/
+    commands/
+      requestpromotion/{RequestPromotionCommand.java,RequestPromotionHandler.java}
+      approvepromotion/...
+      startdeployment/...
+      completepromotion/...
+      rollbackpromotion/...
+      cancelpromotion/...
+    queries/
+      getpromotiondetail/...
+      getapplicationstatus/...
+      getapplicationpromotions/...
+  infrastructure/
+    persistence/
+      PromotionRepository.java    # write side (Spring Data JDBC / JdbcTemplate)
+      OutboxRepository.java
+      readmodel/                  # projector-maintained tables
+    adapters/
+      inmemory/
+        InMemoryDeploymentAdapter.java
+        InMemoryIssueTrackerAdapter.java
+        InMemoryNotificationAdapter.java
+    queue/
+      RabbitMqPublisher.java
+      OutboxRelay.java
+  consumers/
+    AuditLogConsumer.java
+    ReadModelProjector.java
+    NotificationConsumer.java
+    ReleaseNotesAgentConsumer.java   # optional
+  api/
+    controllers/
+    ErrorMapping.java
+src/main/resources/
+  db/migration/                     # Flyway SQL migrations
+  application.yml
+src/test/java/com/releasepilot/...  # mirrors main, per §14
+pom.xml
+docker-compose.yml
+```
+
+---
+
+## 13. docker-compose.yml (scope)
+
+Services:
+- `postgres` — with a seeded volume/init script for schema.
+- `rabbitmq` (management image, so the UI is available for demo/debugging).
+- Optionally the app + consumers as additional services once containerized,
+  but at minimum the brief only requires DB + queue to be one-command-up;
+  the app itself can run locally against those two containers during
+  development.
+
+---
+
+## 14. Testing Strategy
+
+1. **Aggregate unit tests** (no infra) — every invariant in §3.3 gets a
+   direct test: legal transition succeeds, illegal one throws the specific
+   domain error.
+2. **Command handler tests** — using in-memory repository + stub ports,
+   verifying the right event shape is produced and persisted to the outbox.
+3. **Consumer tests** — feed a `DomainEvent` in, assert the audit row / read
+   model / notification call is correct.
+4. **API integration tests** — a handful of end-to-end happy-path +
+   rule-violation cases asserting HTTP status codes match §10's error
+   mapping.
+
+---
+Read V1__create_promotions_table.sql
+Bash
+IN
+cat .dockerignore; echo ---; cat .gitignore | head -30; echo ---; find . -iname "*compose*" -not -path "./target/*"
+
+OUT
+target/
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+AI-chat-logs/
+HELP.md
+README.md
+SPECS.md
+originalDescription.md
+---
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+---
+./.git/refs/heads/04-local-docker-compose-deployment
+./.git/logs/refs/heads/04-local-docker-compose-deployment
+Write docker-compose.yml
+59 lines
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: releasepilot
+      POSTGRES_USER: releasepilot
+      POSTGRES_PASSWORD: releasepilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U releasepilot -d releasepilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: releasepilot
+      RABBITMQ_DEFAULT_PASS: releasepilot
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: ghcr.io/suken27/agile-monkeys-test:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/releasepilot
+      SPRING_DATASOURCE_USERNAME: releasepilot
+      SPRING_DATASOURCE_PASSWORD: releasepilot
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: releasepilot
+      SPRING_RABBITMQ_PASSWORD: releasepilot
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+Bash
+IN
+docker compose config -q && echo OK
+
+OUT
+Exit code 125
+unknown shorthand flag: 'q' in -q
+
+Usage:  docker [OPTIONS] COMMAND [ARG...]
+
+Run 'docker --help' for more information
+Bash
+IN
+docker compose config >/tmp/compose-check.yml 2>&1; echo exit:$?; cat /tmp/compose-check.yml | head -60
+
+OUT
+exit:1
+docker: unknown command: docker compose
+
+Run 'docker --help' for more information
+Bash
+IN
+docker --version; which docker-compose; docker-compose --version 2>&1
+
+OUT
+Exit code 127
+Docker version 29.1.3, build 29.1.3-0ubuntu3~24.04.2
+/bin/bash: line 1: docker-compose: command not found
+Bash
+IN
+python3 -c "import yaml,sys; d=yaml.safe_load(open('docker-compose.yml')); print('OK'); import json; print(json.dumps(list(d.keys())))"
+
+OUT
+claude-sonnet-5[1m] is temporarily unavailable, so auto mode cannot determine the safety of Bash right now. Wait briefly and then try this action again. If it keeps failing, continue with other tasks that don't require this action and come back to it later. Note: reading files, searching code, and other read-only operations do not require the classifier and can still be used.
+Bash
+IN
+python3 -c "import yaml; d=yaml.safe_load(open('docker-compose.yml')); print('OK', list(d.keys()))"
+
+OUT
+OK ['services', 'volumes']
+YAML is valid. Created docker-compose.yml at the repo root with three services, matching the infra scope defined in SPECS.md:
+
+postgres (postgres:16-alpine, matching the version already used by the Testcontainers IT) — seeded via a named volume, with a healthcheck.
+rabbitmq (rabbitmq:3-management-alpine) — management UI exposed on 15672, healthcheck via rabbitmq-diagnostics ping.
+app — pulls ghcr.io/suken27/agile-monkeys-test:latest with pull_policy: always so it's always refreshed to latest on docker compose up, waits on both dependencies to be healthy, and gets Spring Boot datasource/RabbitMQ env vars pointed at the other two services.
+Note: the app currently excludes DataSourceAutoConfiguration and has no AMQP dependency yet (per ReleasePilotApplication.java), so those env vars are inert until that wiring lands — but they match Spring Boot's standard property names so this compose file needs no changes when it does.
+
+I couldn't verify with docker compose config since the compose plugin isn't installed in this sandbox, but I validated the YAML parses correctly. Run docker compose up to bring everything up on ports 8080 (app), 5432 (postgres), and 5672/15672 (rabbitmq).
