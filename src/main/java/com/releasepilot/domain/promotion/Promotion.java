@@ -174,22 +174,36 @@ public final class Promotion {
 	}
 
 	public void rollback(Actor actor) {
+		rollback(actor, null);
+	}
+
+	/** @param reason optional free-text reason (SPECS §4/§5); omitted from the event payload when {@code null}. */
+	public void rollback(Actor actor, String reason) {
 		requireNotTerminal();
 		if (status != PromotionStatus.IN_PROGRESS) {
 			throw new InvalidTransitionError(status, "RollbackPromotion");
 		}
 		this.status = PromotionStatus.ROLLED_BACK;
-		recordEvent(EVENT_PROMOTION_ROLLED_BACK, actor, Map.of());
+		recordEvent(EVENT_PROMOTION_ROLLED_BACK, actor, reasonPayload(reason));
 	}
 
 	/** Invariant #4/#5: cancellation is only possible before deployment has started. */
 	public void cancel(Actor actor) {
+		cancel(actor, null);
+	}
+
+	/** @param reason optional free-text reason (SPECS §4/§5); omitted from the event payload when {@code null}. */
+	public void cancel(Actor actor, String reason) {
 		requireNotTerminal();
 		if (status != PromotionStatus.REQUESTED && status != PromotionStatus.APPROVED) {
 			throw new InvalidTransitionError(status, "CancelPromotion");
 		}
 		this.status = PromotionStatus.CANCELLED;
-		recordEvent(EVENT_PROMOTION_CANCELLED, actor, Map.of());
+		recordEvent(EVENT_PROMOTION_CANCELLED, actor, reasonPayload(reason));
+	}
+
+	private static Map<String, Object> reasonPayload(String reason) {
+		return reason == null ? Map.of() : Map.of("reason", reason);
 	}
 
 	private void requireNotTerminal() {

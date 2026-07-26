@@ -280,6 +280,27 @@ class PromotionTest {
 	}
 
 	@Test
+	void rollingBackWithAReasonCarriesItInTheEventPayload() {
+		Promotion promotion = inProgressPromotion();
+		promotion.pullDomainEvents();
+
+		promotion.rollback(approver, "deployment health check failed");
+
+		assertThat(promotion.pullDomainEvents().get(0).payload()).containsEntry(
+				"reason", "deployment health check failed");
+	}
+
+	@Test
+	void rollingBackWithoutAReasonOmitsItFromTheEventPayload() {
+		Promotion promotion = inProgressPromotion();
+		promotion.pullDomainEvents();
+
+		promotion.rollback(approver);
+
+		assertThat(promotion.pullDomainEvents().get(0).payload()).doesNotContainKey("reason");
+	}
+
+	@Test
 	void cancellingRecordsAPromotionCancelledEvent() {
 		Promotion promotion = approvedPromotion();
 		promotion.pullDomainEvents();
@@ -289,6 +310,16 @@ class PromotionTest {
 		assertThat(promotion.pullDomainEvents())
 				.extracting(event -> event.eventType())
 				.containsExactly(Promotion.EVENT_PROMOTION_CANCELLED);
+	}
+
+	@Test
+	void cancellingWithAReasonCarriesItInTheEventPayload() {
+		Promotion promotion = requestedPromotion();
+		promotion.pullDomainEvents();
+
+		promotion.cancel(requester, "no longer needed");
+
+		assertThat(promotion.pullDomainEvents().get(0).payload()).containsEntry("reason", "no longer needed");
 	}
 
 	@Test
