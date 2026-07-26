@@ -9,3 +9,19 @@ spring:
       on-profile: read-model-projector
   main:
     web-application-type: none
+
+---
+spring:
+  config:
+    activate:
+      on-profile: audit-log-consumer
+  main:
+    web-application-type: none
+
+---
+spring:
+  config:
+    activate:
+      on-profile: outbox-relay
+  main:
+    web-application-type: none

@@ -1,0 +1,536 @@
+
+SPECS.md
+implement the audit log consumer, follow @SPECS.md guidelines, do the same that was done for @src/main/java/com/releasepilot/consumers/ReadModelProjector.java , so the consumer gets deployed with the project but in a separate process
+Bash
+IN
+find src -iname "*Consumer*" -o -iname "*Listener*" -o -iname "*RabbitMq*" -o -iname "*Outbox*" | sort
+
+OUT
+src/main/java/com/releasepilot/consumers
+src/main/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisher.java
+src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+src/main/java/com/releasepilot/infrastructure/queue/ReadModelProjectorListener.java
+src/main/resources/db/migration/V2__create_outbox_events_table.sql
+src/test/java/com/releasepilot/consumers
+src/test/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisherIT.java
+src/test/java/com/releasepilot/infrastructure/queue/OutboxRelayIT.java
+Read ReadModelProjectorListener.java
+Bash
+IN
+find src/main/resources/db/migration -iname "*.sql" | sort; echo ---; ls src/test/java/com/releasepilot/consumers
+
+OUT
+src/main/resources/db/migration/V1__create_promotions_table.sql
+src/main/resources/db/migration/V2__create_outbox_events_table.sql
+src/main/resources/db/migration/V3__create_read_model_tables.sql
+---
+ReadModelProjectorIT.java
+Bash
+IN
+grep -rl "ReadModelProjectorConfig\|read-model-projector" src/main/resources docker-compose.yml pom.xml 2>/dev/null; echo ---; find src/main/java -iname "*Config*"
+
+OUT
+src/main/resources/application.yml
+docker-compose.yml
+---
+src/main/java/com/releasepilot/infrastructure/queue/ReadModelProjectorConfig.java
+Read ReadModelProjectorIT.java
+Bash
+IN
+git diff src/test/java/com/releasepilot/consumers/ReadModelProjectorIT.java
+
+OUT
+diff --git a/src/test/java/com/releasepilot/consumers/ReadModelProjectorIT.java b/src/test/java/com/releasepilot/consumers/ReadModelProjectorIT.java
+index afa25c4..836f99f 100644
+--- a/src/test/java/com/releasepilot/consumers/ReadModelProjectorIT.java
++++ b/src/test/java/com/releasepilot/consumers/ReadModelProjectorIT.java
+@@ -101,7 +101,7 @@ class ReadModelProjectorIT {
+ 		assertThat(detail.status()).isEqualTo(PromotionStatus.COMPLETED);
+ 		assertThat(detail.requestedBy()).isEqualTo("alice");
+ 		assertThat(detail.approvedBy()).isEqualTo("bob");
+-		assertThat(detail.history()).extracting(PromotionDetail.PromotionHistoryEntry::status).containsExactly(
++		assertThat(detail.history()).extracting(promDetail -> promDetail.status()).containsExactly(
+ 				PromotionStatus.REQUESTED, PromotionStatus.APPROVED, PromotionStatus.IN_PROGRESS,
+ 				PromotionStatus.COMPLETED);
+ 
+@@ -128,7 +128,7 @@ class ReadModelProjectorIT {
+ 
+ 		PromotionDetail detail = readModel.findPromotionDetail(promotionId).orElseThrow();
+ 		assertThat(detail.status()).isEqualTo(PromotionStatus.CANCELLED);
+-		assertThat(detail.history()).extracting(PromotionDetail.PromotionHistoryEntry::status).containsExactly(
++		assertThat(detail.history()).extracting(promDetail -> promDetail.status()).containsExactly(
+ 				PromotionStatus.REQUESTED, PromotionStatus.CANCELLED);
+ 
+ 		var dev = readModel.findApplicationEnvironmentStatus(applicationId).environments().stream()
+Read ReadModelProjectorConfig.java
+Read application.yml
+Read docker-compose.yml
+Read V3__create_read_model_tables.sql
+Bash
+IN
+find src/main/java/com/releasepilot/domain/promotion -iname "DomainEvent.java" -o -iname "Promotion.java" | xargs -I{} echo {}
+
+OUT
+src/main/java/com/releasepilot/domain/promotion/Promotion.java
+src/main/java/com/releasepilot/domain/promotion/DomainEvent.java
+Read DomainEvent.java
+Bash
+IN
+grep -n "EVENT_\|PROMOTION_EVENTS_EXCHANGE" src/main/java/com/releasepilot/domain/promotion/Promotion.java src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+
+OUT
+src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java:24: * {@value #PROMOTION_EVENTS_EXCHANGE} fanout exchange, and marks it as sent. This is the second
+src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java:34:	public static final String PROMOTION_EVENTS_EXCHANGE = "promotion.events";
+src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java:63:			rabbitTemplate.send(PROMOTION_EVENTS_EXCHANGE, "", toMessage(row));
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:27:	public static final String EVENT_PROMOTION_REQUESTED = "PromotionRequested";
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:28:	public static final String EVENT_PROMOTION_APPROVED = "PromotionApproved";
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:29:	public static final String EVENT_DEPLOYMENT_STARTED = "DeploymentStarted";
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:30:	public static final String EVENT_PROMOTION_COMPLETED = "PromotionCompleted";
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:31:	public static final String EVENT_PROMOTION_ROLLED_BACK = "PromotionRolledBack";
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:32:	public static final String EVENT_PROMOTION_CANCELLED = "PromotionCancelled";
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:112:		promotion.recordEvent(EVENT_PROMOTION_REQUESTED, requestedBy, payload);
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:149:		recordEvent(EVENT_PROMOTION_APPROVED, approver, Map.of("approvedBy", approver.userId()));
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:164:		recordEvent(EVENT_DEPLOYMENT_STARTED, actor, Map.of());
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:173:		recordEvent(EVENT_PROMOTION_COMPLETED, actor, Map.of());
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:187:		recordEvent(EVENT_PROMOTION_ROLLED_BACK, actor, reasonPayload(reason));
+src/main/java/com/releasepilot/domain/promotion/Promotion.java:202:		recordEvent(EVENT_PROMOTION_CANCELLED, actor, reasonPayload(reason));
+Read OutboxEventPublisher.java
+Read OutboxRelay.java
+Read V2__create_outbox_events_table.sql
+Bash
+IN
+grep -rn "ApplicationId\|PromotionId" src/main/java/com/releasepilot/domain/promotion/ApplicationId.java src/main/java/com/releasepilot/domain/promotion/PromotionId.java | head -30
+
+OUT
+src/main/java/com/releasepilot/domain/promotion/PromotionId.java:6:public record PromotionId(UUID value) {
+src/main/java/com/releasepilot/domain/promotion/PromotionId.java:8:	public PromotionId {
+src/main/java/com/releasepilot/domain/promotion/PromotionId.java:9:		Objects.requireNonNull(value, "PromotionId value must not be null");
+src/main/java/com/releasepilot/domain/promotion/PromotionId.java:12:	public static PromotionId of(String value) {
+src/main/java/com/releasepilot/domain/promotion/PromotionId.java:13:		return new PromotionId(UUID.fromString(value));
+src/main/java/com/releasepilot/domain/promotion/PromotionId.java:16:	public static PromotionId random() {
+src/main/java/com/releasepilot/domain/promotion/PromotionId.java:17:		return new PromotionId(UUID.randomUUID());
+src/main/java/com/releasepilot/domain/promotion/ApplicationId.java:6:public record ApplicationId(UUID value) {
+src/main/java/com/releasepilot/domain/promotion/ApplicationId.java:8:	public ApplicationId {
+src/main/java/com/releasepilot/domain/promotion/ApplicationId.java:9:		Objects.requireNonNull(value, "ApplicationId value must not be null");
+src/main/java/com/releasepilot/domain/promotion/ApplicationId.java:12:	public static ApplicationId of(String value) {
+src/main/java/com/releasepilot/domain/promotion/ApplicationId.java:13:		return new ApplicationId(UUID.fromString(value));
+src/main/java/com/releasepilot/domain/promotion/ApplicationId.java:16:	public static ApplicationId random() {
+src/main/java/com/releasepilot/domain/promotion/ApplicationId.java:17:		return new ApplicationId(UUID.randomUUID());
+Now I have the full picture. Let me create all the pieces: migration, consumer, listener, config, application.yml, docker-compose, and a test.
+
+Write V4__create_audit_log_table.sql
+15 lines
+-- Audit log table (SPECS §8.1): the system of record for "what happened when," populated only by
+-- the audit-log consumer as it consumes events off the queue — never written to by command
+-- handlers directly, so this table also proves the queue path works end to end.
+CREATE TABLE audit_log (
+    id               UUID PRIMARY KEY,
+    event_type       VARCHAR(50) NOT NULL,
+    promotion_id     UUID NOT NULL,
+    application_id   UUID NOT NULL,
+    acting_user      VARCHAR(255) NOT NULL,
+    occurred_at      TIMESTAMPTZ NOT NULL,
+    payload          JSONB NOT NULL
+);
+
+CREATE INDEX idx_audit_log_promotion ON audit_log (promotion_id, occurred_at);
+Write AuditLogConsumer.java
+49 lines
+package com.releasepilot.consumers;
+
+import com.releasepilot.domain.promotion.DomainEvent;
+import org.springframework.jdbc.core.JdbcTemplate;
+import tools.jackson.databind.ObjectMapper;
+
+import java.sql.Timestamp;
+
+/**
+ * Audit log consumer (SPECS §8.1): persists every {@link DomainEvent} published off the outbox
+ * verbatim to the {@code audit_log} table — the system of record for "what happened when." Never
+ * written to by command handlers directly; only by consuming the published event, which also
+ * proves the queue path actually works end to end.
+ *
+ * <p>Keyed by the event's own {@code eventId} with {@code ON CONFLICT DO NOTHING} so re-delivery
+ * under the outbox's at-least-once guarantee (SPECS §5.1) never produces a duplicate row.
+ *
+ * <p>Deliberately not a {@code @RabbitListener} bean itself — like {@link ReadModelProjector}, this
+ * class depends on nothing but a {@link DomainEvent} and a {@link JdbcTemplate}, which keeps it
+ * directly testable (SPECS §14.3) without a broker; the queue transport that decodes a message into
+ * a {@code DomainEvent} and calls {@link #record} is a separate, thin adapter.
+ */
+public class AuditLogConsumer {
+
+	private final JdbcTemplate jdbcTemplate;
+	private final ObjectMapper objectMapper;
+
+	public AuditLogConsumer(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+		this.jdbcTemplate = jdbcTemplate;
+		this.objectMapper = objectMapper;
+	}
+
+	public void record(DomainEvent event) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO audit_log (id, event_type, promotion_id, application_id, acting_user, occurred_at, payload)
+				VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)
+				ON CONFLICT (id) DO NOTHING
+				""",
+				event.eventId(),
+				event.eventType(),
+				event.promotionId().value(),
+				event.applicationId().value(),
+				event.actingUser(),
+				Timestamp.from(event.occurredAt()),
+				objectMapper.writeValueAsString(event.payload()));
+	}
+}
+Now the queue transport adapter, config, and profile wiring — mirroring ReadModelProjectorListener/ReadModelProjectorConfig:
+
+Write AuditLogListener.java
+68 lines
+package com.releasepilot.infrastructure.queue;
+
+import com.releasepilot.consumers.AuditLogConsumer;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.DomainEvent;
+import com.releasepilot.domain.promotion.PromotionId;
+import org.springframework.amqp.core.ExchangeTypes;
+import org.springframework.amqp.rabbit.annotation.Exchange;
+import org.springframework.amqp.rabbit.annotation.Queue;
+import org.springframework.amqp.rabbit.annotation.QueueBinding;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * The thin queue-transport adapter {@link AuditLogConsumer}'s class-level javadoc anticipates:
+ * declares and binds its own queue to the {@value OutboxRelay#PROMOTION_EVENTS_EXCHANGE} fanout
+ * exchange (SPECS §8.1), decodes the JSON envelope {@link OutboxRelay} publishes back into a
+ * {@link DomainEvent}, and hands it to {@link AuditLogConsumer#record}.
+ *
+ * <p>Only active under the {@code audit-log-consumer} Spring profile (see {@code
+ * AuditLogConfig} and {@code application.yml}), so this consumer is deployed and scaled as its own
+ * OS process/container — started from the same jar/image as the API via {@code
+ * SPRING_PROFILES_ACTIVE=audit-log-consumer} — rather than sharing the API process's call stack
+ * (SPECS §8, §15).
+ */
+@Component
+@Profile("audit-log-consumer")
+public class AuditLogListener {
+
+	static final String QUEUE_NAME = "promotion.events.audit-log-consumer";
+
+	private final AuditLogConsumer consumer;
+	private final ObjectMapper objectMapper;
+
+	public AuditLogListener(AuditLogConsumer consumer, ObjectMapper objectMapper) {
+		this.consumer = consumer;
+		this.objectMapper = objectMapper;
+	}
+
+	@RabbitListener(bindings = @QueueBinding(
+			value = @Queue(name = QUEUE_NAME, durable = "true"),
+			exchange = @Exchange(name = OutboxRelay.PROMOTION_EVENTS_EXCHANGE, type = ExchangeTypes.FANOUT)))
+	public void onMessage(byte[] body) {
+		Map<String, Object> envelope = objectMapper.readValue(body, new TypeReference<Map<String, Object>>() {
+		});
+		consumer.record(toDomainEvent(envelope));
+	}
+
+	@SuppressWarnings("unchecked")
+	private static DomainEvent toDomainEvent(Map<String, Object> envelope) {
+		return new DomainEvent(
+				UUID.fromString((String) envelope.get("eventId")),
+				(String) envelope.get("eventType"),
+				Instant.parse((String) envelope.get("occurredAt")),
+				PromotionId.of((String) envelope.get("promotionId")),
+				ApplicationId.of((String) envelope.get("applicationId")),
+				(String) envelope.get("actingUser"),
+				(Map<String, Object>) envelope.get("payload"));
+	}
+}
+Write AuditLogConfig.java
+24 lines
+package com.releasepilot.infrastructure.queue;
+
+import com.releasepilot.consumers.AuditLogConsumer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.JdbcTemplate;
+import tools.jackson.databind.ObjectMapper;
+
+/**
+ * Wires {@link AuditLogConsumer} as a bean only under the {@code audit-log-consumer} profile
+ * consumed by {@link AuditLogListener} — kept out of {@link AuditLogConsumer} itself so that class
+ * stays exactly what its own javadoc says it is: plain Java, testable without Spring.
+ */
+@Configuration
+@Profile("audit-log-consumer")
+public class AuditLogConfig {
+
+	@Bean
+	public AuditLogConsumer auditLogConsumer(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+		return new AuditLogConsumer(jdbcTemplate, objectMapper);
+	}
+}
+That hint matches the existing ReadModelProjectorConfig pattern exactly, so it's consistent with the codebase style. Now updating application.yml and docker-compose.yml.
+
+Edit application.yml
+Added 8 lines
+Edit docker-compose.yml
+Added 19 lines
+Read OutboxEventPublisherIT.java
+Now I'll write the matching IT test for AuditLogConsumer:
+
+Write AuditLogConsumerIT.java
+113 lines
+package com.releasepilot.consumers;
+
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.DomainEvent;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Role;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.ObjectMapper;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Exercises {@link AuditLogConsumer} against a real PostgreSQL instance (via Testcontainers),
+ * proving a consumed {@link DomainEvent} lands in {@code audit_log} verbatim, with its payload
+ * stored as real {@code jsonb}, and that re-delivering the same event (SPECS §5.1's at-least-once
+ * guarantee) never produces a duplicate row. This is the "consumer test" from SPECS §14.3: feed a
+ * {@code DomainEvent} in, assert the audit row is correct.
+ *
+ * <p>Named {@code *IT} rather than {@code *Test} — see {@code JdbcPromotionRepositoryIT} for why
+ * only {@code mvnw verify} runs it.
+ */
+@Testcontainers
+class AuditLogConsumerIT {
+
+	@Container
+	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
+
+	private static HikariDataSource dataSource;
+	private static JdbcTemplate jdbcTemplate;
+	private static AuditLogConsumer consumer;
+
+	private final ApplicationId applicationId = ApplicationId.random();
+	private final PromotionId promotionId = PromotionId.random();
+	private final Actor requester = new Actor("alice", Role.REQUESTER);
+
+	@BeforeAll
+	static void migrateSchemaAndConnect() {
+		HikariConfig config = new HikariConfig();
+		config.setJdbcUrl(POSTGRES.getJdbcUrl());
+		config.setUsername(POSTGRES.getUsername());
+		config.setPassword(POSTGRES.getPassword());
+		dataSource = new HikariDataSource(config);
+
+		Flyway.configure().dataSource(dataSource).load().migrate();
+
+		jdbcTemplate = new JdbcTemplate(dataSource);
+		consumer = new AuditLogConsumer(jdbcTemplate, new ObjectMapper());
+	}
+
+	@AfterAll
+	static void closeDataSource() {
+		dataSource.close();
+	}
+
+	@BeforeEach
+	void cleanTable() {
+		jdbcTemplate.update("DELETE FROM audit_log");
+	}
+
+	@Test
+	void recordingAnEventInsertsAnAuditRowWithTheFullPayload() {
+		DomainEvent event = DomainEvent.of(
+				Promotion.EVENT_PROMOTION_REQUESTED, promotionId, applicationId, requester,
+				Map.of("version", "1.4.0", "targetEnvironment", "DEV"));
+
+		consumer.record(event);
+
+		Map<String, Object> row = jdbcTemplate.queryForMap(
+				"SELECT event_type, promotion_id, application_id, acting_user, payload::text AS payload_text "
+						+ "FROM audit_log WHERE id = ?",
+				event.eventId());
+
+		assertThat(row.get("event_type")).isEqualTo(Promotion.EVENT_PROMOTION_REQUESTED);
+		assertThat(row.get("promotion_id")).isEqualTo(promotionId.value());
+		assertThat(row.get("application_id")).isEqualTo(applicationId.value());
+		assertThat(row.get("acting_user")).isEqualTo("alice");
+		assertThat((String) row.get("payload_text")).contains("\"version\"", "1.4.0", "targetEnvironment", "DEV");
+	}
+
+	@Test
+	void recordingTheSameEventTwiceNeverProducesADuplicateRow() {
+		DomainEvent event = DomainEvent.of(
+				Promotion.EVENT_PROMOTION_APPROVED, promotionId, applicationId, requester,
+				Map.of("approvedBy", "bob"));
+
+		consumer.record(event);
+		consumer.record(event);
+
+		Integer count = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM audit_log WHERE id = ?", Integer.class, event.eventId());
+		assertThat(count).isEqualTo(1);
+	}
+
+	private interface Promotion {
+		String EVENT_PROMOTION_REQUESTED = com.releasepilot.domain.promotion.Promotion.EVENT_PROMOTION_REQUESTED;
+		String EVENT_PROMOTION_APPROVED = com.releasepilot.domain.promotion.Promotion.EVENT_PROMOTION_APPROVED;
+	}
+}
+Edit AuditLogConsumerIT.java
+Added 1 line
+Now removing the awkward inner interface trick I added earlier — no longer needed with the direct import:
+
+Edit AuditLogConsumerIT.java
+Removed 5 lines
+Now let's check for a listener-config test pattern (unit test for the queue listener/config) and check whether there's a README documenting profiles that should be updated too.
+
+Bash
+IN
+grep -rln "read-model-projector" --include="*.md" . 2>/dev/null; find src/test -iname "*ReadModelProjectorListener*" -o -iname "*ReadModelProjectorConfig*"
+
+OUT
+(Bash completed with no output)
+Bash
+IN
+grep -rl "read-model-projector\|ReadModelProjectorListener\|ReadModelProjectorConfig" src/test 2>/dev/null; echo ---; find src/test -iname "*ApplicationIT*" -o -iname "*ContextIT*" -o -iname "*SmokeIT*"
+
+OUT
+---
+src/test/java/com/releasepilot/ReleasePilotApplicationIT.java
+Read ReleasePilotApplicationIT.java
+This default-profile smoke test doesn't need changes since our beans are profile-gated. Let me verify everything compiles.
+
+Bash
+IN
+./mvnw -q -o compile test-compile 2>&1 | tail -100
+
+OUT
+(Bash completed with no output)
+Compiles cleanly. Now let's run the unit test suite (fast, no Testcontainers) to make sure nothing broke, and try the new IT test too.
+
+Bash
+IN
+./mvnw -q -o test 2>&1 | tail -150
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+21:14:00.707 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionQueryControllerTest]: PromotionQueryControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+21:14:00.773 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionQueryControllerTest
+21:14:00.774 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionQueryControllerTest]: PromotionQueryControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+21:14:00.780 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionQueryControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T21:14:00.941+02:00  INFO 215255 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Starting PromotionQueryControllerTest using Java 21.0.11 with PID 215255 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T21:14:00.942+02:00  INFO 215255 --- [           main] c.r.a.c.PromotionQueryControllerTest     : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T21:14:01.260+02:00  INFO 215255 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-26T21:14:01.260+02:00  INFO 215255 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-26T21:14:01.261+02:00  INFO 215255 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-07-26T21:14:01.277+02:00  INFO 215255 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Started PromotionQueryControllerTest in 0.474 seconds (process running for 1.552)
+2026-07-26T21:14:01.405+02:00  INFO 215255 --- [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionCommandControllerTest]: PromotionCommandControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-07-26T21:14:01.409+02:00  INFO 215255 --- [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionCommandControllerTest
+2026-07-26T21:14:01.409+02:00  INFO 215255 --- [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionCommandControllerTest]: PromotionCommandControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-07-26T21:14:01.411+02:00  INFO 215255 --- [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionCommandControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T21:14:01.427+02:00  INFO 215255 --- [           main] c.r.a.c.PromotionCommandControllerTest   : Starting PromotionCommandControllerTest using Java 21.0.11 with PID 215255 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T21:14:01.428+02:00  INFO 215255 --- [           main] c.r.a.c.PromotionCommandControllerTest   : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T21:14:01.529+02:00  INFO 215255 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-26T21:14:01.529+02:00  INFO 215255 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-26T21:14:01.530+02:00  INFO 215255 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-07-26T21:14:01.534+02:00  INFO 215255 --- [           main] c.r.a.c.PromotionCommandControllerTest   : Started PromotionCommandControllerTest in 0.119 seconds (process running for 1.809)
+Unit tests pass. Now let's run the full verify (including Testcontainers-based IT tests) to confirm the new AuditLogConsumerIT and audit_log migration actually work end to end.
+
+Bash
+IN
+docker info >/dev/null 2>&1 && echo "docker ok" || echo "no docker"
+
+OUT
+no docker
+Bash
+IN
+grep -rln "ReadModelProjector\b" --include="*.md" . 2>/dev/null; find . -maxdepth 1 -iname "README*" -o -iname "CLAUDE.md"
+
+OUT
+SPECS.md
+./README.md
+Bash
+IN
+grep -n "read-model-projector\|ReadModelProjector\|audit-log\|AuditLog\|consumers" README.md
+
+OUT
+209:consumers exist — each future consumer (audit log, read-model projector,
+214:async-processing/consumers work (SPECS §8), not the HTTP command/query layer
+278:  consumers/         # Async event consumers (audit log, projections, notifications) — not yet built
+Read README.md (lines 181-280)
+Bash
+IN
+git status --short
+
+OUT
+ M docker-compose.yml
+ M src/main/resources/application.yml
+ M src/test/java/com/releasepilot/consumers/ReadModelProjectorIT.java
+?? src/main/java/com/releasepilot/consumers/AuditLogConsumer.java
+?? src/main/java/com/releasepilot/infrastructure/queue/AuditLogConfig.java
+?? src/main/java/com/releasepilot/infrastructure/queue/AuditLogListener.java
+?? src/main/resources/db/migration/V4__create_audit_log_table.sql
+?? src/test/java/com/releasepilot/consumers/AuditLogConsumerIT.java
+Implemented the audit log consumer, mirroring ReadModelProjector's structure exactly:
+
+AuditLogConsumer.java (consumers/) — plain Java, depends only on JdbcTemplate/ObjectMapper; writes every event verbatim to audit_log, keyed by eventId with ON CONFLICT DO NOTHING for at-least-once redelivery safety.
+V4__create_audit_log_table.sql — new Flyway migration for the audit_log table.
+AuditLogListener.java (infrastructure/queue/) — @RabbitListener adapter bound to the promotion.events fanout exchange via its own queue (promotion.events.audit-log-consumer), decodes the envelope, hands off to the consumer. Gated behind the audit-log-consumer Spring profile.
+AuditLogConfig.java — wires the AuditLogConsumer bean only under that profile.
+application.yml — added the audit-log-consumer profile block (web-application-type: none, same as the projector).
+docker-compose.yml — added an audit-log-consumer service, same image, SPRING_PROFILES_ACTIVE=audit-log-consumer, so it deploys as its own container/process alongside read-model-projector.
+AuditLogConsumerIT.java — Testcontainers Postgres test proving an event round-trips into audit_log with real jsonb payload, and that re-recording the same event is a no-op (dedup check).
+Verified mvnw compile test-compile and the non-Testcontainers unit suite (mvnw test) pass. Docker isn't available in this environment, so I couldn't run the new AuditLogConsumerIT itself — worth running mvnw verify locally where Docker is present to confirm the Testcontainers path.
+
