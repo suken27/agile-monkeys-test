@@ -263,10 +263,13 @@ empty results — a data-population gap, not a bug in the query path, which is w
 `JdbcPromotionReadModelRepositoryIT` seeds rows directly (standing in for the future projector) to
 prove the queries themselves are correct.
 
-`DeploymentPort` (SPECS §6) now has its in-memory stub, `InMemoryDeploymentAdapter`
-(`infrastructure/adapters/inmemory/`), registered as a `@Component` — `StartDeployment` needs a
-live bean for the app context to boot. `IssueTrackerPort` and `NotificationPort` still have no
-adapter; nothing on the command or query path calls them yet.
+All three output ports from SPECS §6 now have in-memory stubs registered as `@Component` beans in
+`infrastructure/adapters/inmemory/`: `InMemoryDeploymentAdapter` (called synchronously by
+`StartDeployment`, needed for the app context to boot), `InMemoryIssueTrackerAdapter` (seeded/keyed
+by `(applicationId, version)`), and `InMemoryNotificationAdapter`. The latter two just have their
+stub bean and unit tests for now — nothing on the command/query path or async consumer side calls
+either yet; the Notification consumer that would call `NotificationPort.notify(...)` on
+terminal-state events (SPECS §8.3) is still to be built.
 
 ## Project structure
 
@@ -275,7 +278,7 @@ src/main/java/com/releasepilot/
   domain/          # Promotion aggregate, value objects, invariants, ports
   application/      # Command and query handlers, read-model port, query DTOs
   infrastructure/    # Persistence (write + read model), in-memory adapters, message queue
-  consumers/         # Async event consumers (audit log, projections, notifications) — not yet built
+  consumers/         # Async event consumers (audit log, read-model projections); notification consumer not yet built
   api/                # Thin REST controllers, request/response DTOs, error mapping
 src/main/resources/
   db/migration/       # Flyway SQL migrations

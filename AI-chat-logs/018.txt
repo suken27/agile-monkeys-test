@@ -1,0 +1,646 @@
+
+OutboxRelay.java
+implement the caller of @src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+I'll look at the surrounding code to understand conventions before wiring up the caller.
+
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot -type d | sort
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/controllers
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/dto
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/dto/commands
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/dto/queries
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/queries
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/consumers
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/adapters
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/adapters/inmemory
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence/readmodel
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue
+Bash
+IN
+grep -rl "OutboxRelay" /home/juanjo/git/agile-monkeys-test/src
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/consumers/ReadModelProjector.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/ReadModelProjectorListener.java
+/home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration/V2__create_outbox_events_table.sql
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/AuditLogListener.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisher.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/queue/OutboxRelayIT.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisherIT.java
+Bash
+IN
+ls /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/
+echo ---
+cat /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/AuditLogConfig.java
+echo ---
+cat /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/AuditLogListener.java
+
+OUT
+AuditLogConfig.java
+AuditLogListener.java
+OutboxRelay.java
+ReadModelProjectorConfig.java
+ReadModelProjectorListener.java
+---
+package com.releasepilot.infrastructure.queue;
+
+import com.releasepilot.consumers.AuditLogConsumer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.JdbcTemplate;
+import tools.jackson.databind.ObjectMapper;
+
+/**
+ * Wires {@link AuditLogConsumer} as a bean only under the {@code audit-log-consumer} profile
+ * consumed by {@link AuditLogListener} — kept out of {@link AuditLogConsumer} itself so that class
+ * stays exactly what its own javadoc says it is: plain Java, testable without Spring.
+ */
+@Configuration
+@Profile("audit-log-consumer")
+public class AuditLogConfig {
+
+	@Bean
+	public AuditLogConsumer auditLogConsumer(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+		return new AuditLogConsumer(jdbcTemplate, objectMapper);
+	}
+}
+---
+package com.releasepilot.infrastructure.queue;
+
+import com.releasepilot.consumers.AuditLogConsumer;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.DomainEvent;
+import com.releasepilot.domain.promotion.PromotionId;
+import org.springframework.amqp.core.ExchangeTypes;
+import org.springframework.amqp.rabbit.annotation.Exchange;
+import org.springframework.amqp.rabbit.annotation.Queue;
+import org.springframework.amqp.rabbit.annotation.QueueBinding;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * The thin queue-transport adapter {@link AuditLogConsumer}'s class-level javadoc anticipates:
+ * declares and binds its own queue to the {@value OutboxRelay#PROMOTION_EVENTS_EXCHANGE} fanout
+ * exchange (SPECS §8.1), decodes the JSON envelope {@link OutboxRelay} publishes back into a
+ * {@link DomainEvent}, and hands it to {@link AuditLogConsumer#record}.
+ *
+ * <p>Only active under the {@code audit-log-consumer} Spring profile (see {@code
+ * AuditLogConfig} and {@code application.yml}), so this consumer is deployed and scaled as its own
+ * OS process/container — started from the same jar/image as the API via {@code
+ * SPRING_PROFILES_ACTIVE=audit-log-consumer} — rather than sharing the API process's call stack
+ * (SPECS §8, §15).
+ */
+@Component
+@Profile("audit-log-consumer")
+public class AuditLogListener {
+
+	static final String QUEUE_NAME = "promotion.events.audit-log-consumer";
+
+	private final AuditLogConsumer consumer;
+	private final ObjectMapper objectMapper;
+
+	public AuditLogListener(AuditLogConsumer consumer, ObjectMapper objectMapper) {
+		this.consumer = consumer;
+		this.objectMapper = objectMapper;
+	}
+
+	@RabbitListener(bindings = @QueueBinding(
+			value = @Queue(name = QUEUE_NAME, durable = "true"),
+			exchange = @Exchange(name = OutboxRelay.PROMOTION_EVENTS_EXCHANGE, type = ExchangeTypes.FANOUT)))
+	public void onMessage(byte[] body) {
+		Map<String, Object> envelope = objectMapper.readValue(body, new TypeReference<Map<String, Object>>() {
+		});
+		consumer.record(toDomainEvent(envelope));
+	}
+
+	@SuppressWarnings("unchecked")
+	private static DomainEvent toDomainEvent(Map<String, Object> envelope) {
+		return new DomainEvent(
+				UUID.fromString((String) envelope.get("eventId")),
+				(String) envelope.get("eventType"),
+				Instant.parse((String) envelope.get("occurredAt")),
+				PromotionId.of((String) envelope.get("promotionId")),
+				ApplicationId.of((String) envelope.get("applicationId")),
+				(String) envelope.get("actingUser"),
+				(Map<String, Object>) envelope.get("payload"));
+	}
+}
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot -iname "*Config*"
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/AuditLogConfig.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/ReadModelProjectorConfig.java
+Read ReadModelProjectorConfig.java
+Read OutboxRelayIT.java
+Bash
+IN
+cat /home/juanjo/git/agile-monkeys-test/src/main/resources/application.yml
+echo ---DOCKER---
+cat /home/juanjo/git/agile-monkeys-test/docker-compose.yml
+
+OUT
+spring:
+  application:
+    name: ReleasePilot
+
+---
+spring:
+  config:
+    activate:
+      on-profile: read-model-projector
+  main:
+    web-application-type: none
+
+---
+spring:
+  config:
+    activate:
+      on-profile: audit-log-consumer
+  main:
+    web-application-type: none
+---DOCKER---
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: releasepilot
+      POSTGRES_USER: releasepilot
+      POSTGRES_PASSWORD: releasepilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U releasepilot -d releasepilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: releasepilot
+      RABBITMQ_DEFAULT_PASS: releasepilot
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: ghcr.io/suken27/agile-monkeys-test:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/releasepilot
+      SPRING_DATASOURCE_USERNAME: releasepilot
+      SPRING_DATASOURCE_PASSWORD: releasepilot
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: releasepilot
+      SPRING_RABBITMQ_PASSWORD: releasepilot
+    ports:
+      - "8080:8080"
+
+  read-model-projector:
+    image: ghcr.io/suken27/agile-monkeys-test:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: read-model-projector
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/releasepilot
+      SPRING_DATASOURCE_USERNAME: releasepilot
+      SPRING_DATASOURCE_PASSWORD: releasepilot
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: releasepilot
+      SPRING_RABBITMQ_PASSWORD: releasepilot
+
+  audit-log-consumer:
+    image: ghcr.io/suken27/agile-monkeys-test:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: audit-log-consumer
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/releasepilot
+      SPRING_DATASOURCE_USERNAME: releasepilot
+      SPRING_DATASOURCE_PASSWORD: releasepilot
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: releasepilot
+      SPRING_RABBITMQ_PASSWORD: releasepilot
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+Bash
+IN
+grep -rn "outbox-relay\|OutboxRelay\|EnableScheduling\|@Scheduled" /home/juanjo/git/agile-monkeys-test/src/main/java --include=*.java -l
+echo ---
+find /home/juanjo/git/agile-monkeys-test -maxdepth 1 -iname "SPECS*"
+echo ---
+grep -n "outbox\|relay\|5\.1\|8\.1\|poll" -i /home/juanjo/git/agile-monkeys-test/SPECS.md | head -80
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/ReadModelProjectorListener.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/consumers/ReadModelProjector.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/AuditLogListener.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisher.java
+---
+/home/juanjo/git/agile-monkeys-test/SPECS.md
+---
+71:         │ Outbox → Message Queue    │
+208:  repository.save(promotion)                          // persists new state + appends event to outbox (same transaction)
+243:### 5.1 Reliable publication: transactional outbox
+246:handler writes the new aggregate state **and** an outbox row in the same DB
+247:transaction. A separate lightweight relay polls the outbox table and
+313:(aggregate state + outbox row written) — it does not wait on any consumer.
+378:| Tests | JUnit 5 + AssertJ + Mockito; aggregate unit tests with zero Spring context; handler tests against stub ports; Testcontainers (Postgres + RabbitMQ) for the handful of API-level integration tests | Domain rules get fast, Spring-context-free unit tests — the highest-value tests here — while integration tests still exercise the real outbox → queue → consumer path via Testcontainers rather than mocks. |
+416:      OutboxRepository.java
+425:      OutboxRelay.java
+462:   verifying the right event shape is produced and persisted to the outbox.
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test/src/main/java -iname "*Application.java"
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/ReleasePilotApplication.java
+Read SPECS.md (lines 241-340)
+Read ReleasePilotApplication.java
+Read SPECS.md (lines 401-470)
+Bash
+IN
+grep -rln "Logger\|slf4j" /home/juanjo/git/agile-monkeys-test/src/main/java | head
+echo ---
+cat /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/consumers/ReadModelProjector.java | head -40
+echo ---application.yml full---
+cat -A /home/juanjo/git/agile-monkeys-test/src/main/resources/application.yml | head -5
+echo --- pom scheduling/rabbit deps ---
+grep -n "artifactId" /home/juanjo/git/agile-monkeys-test/pom.xml
+
+OUT
+---
+package com.releasepilot.consumers;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.DomainEvent;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.Promotion;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.PromotionStatus;
+import com.releasepilot.domain.promotion.Version;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.sql.Timestamp;
+import java.util.UUID;
+
+/**
+ * Read-model projector consumer (SPECS §8.2): consumes every {@link DomainEvent} published off the
+ * outbox and updates {@code promotion_detail}, {@code promotion_detail_history},
+ * {@code application_environment_status} and {@code promotion_history} (SPECS §7) — the query side
+ * never reads the write-side {@code promotions} table directly.
+ *
+ * <p>Only {@code PromotionRequested}'s payload carries the promotion's {@code version} and {@code
+ * targetEnvironment} (SPECS §5) — every later event for the same promotion looks those up from the
+ * {@code promotion_detail} row that event created, rather than requiring every event to repeat them.
+ * This assumes events for a given promotion are delivered in the order they were recorded, which
+ * holds here because a single fanout-bound queue preserves publish order and the aggregate itself
+ * only ever produces one promotion's events in that same order (SPECS §5.1).
+ *
+ * <p>Deliberately not a {@code @RabbitListener} bean itself — like {@code OutboxRelay}, this class
+ * depends on nothing but a {@link DomainEvent} and a {@link JdbcTemplate}, which keeps it directly
+ * testable (SPECS §14.3) without a broker; the queue transport that decodes a message into a {@code
+ * DomainEvent} and calls {@link #project} is a separate, thin adapter.
+ */
+public class ReadModelProjector {
+
+	private final JdbcTemplate jdbcTemplate;
+
+	public ReadModelProjector(JdbcTemplate jdbcTemplate) {
+		this.jdbcTemplate = jdbcTemplate;
+	}
+
+---application.yml full---
+spring:$
+  application:$
+    name: ReleasePilot$
+$
+---$
+--- pom scheduling/rabbit deps ---
+7:		<artifactId>spring-boot-starter-parent</artifactId>
+12:	<artifactId>releasepilot</artifactId>
+22:			<artifactId>spring-boot-starter-webmvc</artifactId>
+27:			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+33:			<artifactId>spring-boot-starter-jdbc</artifactId>
+38:			<artifactId>spring-boot-starter-amqp</artifactId>
+43:			<artifactId>postgresql</artifactId>
+49:			<artifactId>flyway-core</artifactId>
+54:			<artifactId>flyway-database-postgresql</artifactId>
+59:			<artifactId>testcontainers-junit-jupiter</artifactId>
+65:			<artifactId>testcontainers-postgresql</artifactId>
+71:			<artifactId>testcontainers-rabbitmq</artifactId>
+80:				<artifactId>spring-boot-maven-plugin</artifactId>
+84:				<artifactId>maven-failsafe-plugin</artifactId>
+Bash
+IN
+git diff docker-compose.yml src/main/resources/application.yml
+
+OUT
+diff --git a/docker-compose.yml b/docker-compose.yml
+index b608c5b..509cd4f 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -72,6 +72,25 @@ services:
+       SPRING_RABBITMQ_USERNAME: releasepilot
+       SPRING_RABBITMQ_PASSWORD: releasepilot
+ 
++  audit-log-consumer:
++    image: ghcr.io/suken27/agile-monkeys-test:latest
++    pull_policy: always
++    restart: unless-stopped
++    depends_on:
++      postgres:
++        condition: service_healthy
++      rabbitmq:
++        condition: service_healthy
++    environment:
++      SPRING_PROFILES_ACTIVE: audit-log-consumer
++      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/releasepilot
++      SPRING_DATASOURCE_USERNAME: releasepilot
++      SPRING_DATASOURCE_PASSWORD: releasepilot
++      SPRING_RABBITMQ_HOST: rabbitmq
++      SPRING_RABBITMQ_PORT: 5672
++      SPRING_RABBITMQ_USERNAME: releasepilot
++      SPRING_RABBITMQ_PASSWORD: releasepilot
++
+ volumes:
+   postgres-data:
+   rabbitmq-data:
+diff --git a/src/main/resources/application.yml b/src/main/resources/application.yml
+index e5cff08..cd20ded 100644
+--- a/src/main/resources/application.yml
++++ b/src/main/resources/application.yml
+@@ -9,3 +9,11 @@ spring:
+       on-profile: read-model-projector
+   main:
+     web-application-type: none
++
++---
++spring:
++  config:
++    activate:
++      on-profile: audit-log-consumer
++  main:
++    web-application-type: none
+Good, that's uncommitted work-in-progress for the audit-log-consumer feature (unrelated but in progress). Now let me create the three pieces: config, scheduler, and wiring in application.yml/docker-compose.yml.
+
+Write OutboxRelayConfig.java
+26 lines
+package com.releasepilot.infrastructure.queue;
+
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import tools.jackson.databind.ObjectMapper;
+
+/**
+ * Wires {@link OutboxRelay} as a bean only under the {@code outbox-relay} profile consumed by
+ * {@link OutboxRelayScheduler} — kept out of {@link OutboxRelay} itself so that class stays exactly
+ * what its own javadoc says it is: plain Java, testable without Spring.
+ */
+@Configuration
+@Profile("outbox-relay")
+@EnableScheduling
+public class OutboxRelayConfig {
+
+	@Bean
+	public OutboxRelay outboxRelay(JdbcTemplate jdbcTemplate, RabbitTemplate rabbitTemplate, ObjectMapper objectMapper) {
+		return new OutboxRelay(jdbcTemplate, rabbitTemplate, objectMapper);
+	}
+}
+That diagnostic is just a hint matching the existing pattern in AuditLogConfig/ReadModelProjectorConfig, so it's consistent with the codebase. Now the scheduler that actually calls relayPendingEvents():
+
+Write OutboxRelayScheduler.java
+34 lines
+package com.releasepilot.infrastructure.queue;
+
+import org.springframework.context.annotation.Profile;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+/**
+ * The poll loop {@link OutboxRelay}'s class-level javadoc anticipates: calls
+ * {@link OutboxRelay#relayPendingEvents()} on a fixed delay, decoupled from the command-handling
+ * call stack, so a broker hiccup here can never make an API call fail or block.
+ *
+ * <p>Only active under the {@code outbox-relay} Spring profile (see {@code OutboxRelayConfig} and
+ * {@code application.yml}), so this relay is deployed and scaled as its own OS process/container —
+ * started from the same jar/image as the API via {@code SPRING_PROFILES_ACTIVE=outbox-relay} —
+ * rather than sharing the API process's call stack (SPECS §5.1, §15).
+ */
+@Component
+@Profile("outbox-relay")
+public class OutboxRelayScheduler {
+
+	private static final long POLL_DELAY_MS = 1000;
+
+	private final OutboxRelay outboxRelay;
+
+	public OutboxRelayScheduler(OutboxRelay outboxRelay) {
+		this.outboxRelay = outboxRelay;
+	}
+
+	@Scheduled(fixedDelay = POLL_DELAY_MS)
+	public void relayPendingEvents() {
+		outboxRelay.relayPendingEvents();
+	}
+}
+Now wire the profile into application.yml and add the docker-compose service:
+
+Read application.yml
+Read docker-compose.yml
+Edit application.yml
+Added 8 lines
+Edit docker-compose.yml
+Added 19 lines
+Now let's build to verify everything compiles.
+
+Bash
+IN
+./mvnw -q -o compile 2>&1 | tail -80
+
+OUT
+(Bash completed with no output)
+Compiles cleanly. Let's also verify test sources still compile (in case of interactions with the modified ReadModelProjectorIT):
+
+Bash
+IN
+./mvnw -q -o test-compile 2>&1 | tail -100
+
+OUT
+(Bash completed with no output)
+Both compile cleanly. Now let's write an integration-style test for the scheduler, following the existing *IT pattern, to prove the Spring wiring actually triggers the relay under the outbox-relay profile.
+
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/queue -type f
+echo ---
+find /home/juanjo/git/agile-monkeys-test/src/test -iname "*AuditLogConfig*" -o -iname "*AuditLogListener*"
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/queue/OutboxRelayIT.java
+---
+Bash
+IN
+grep -rl "SpringBootTest\|ActiveProfiles" /home/juanjo/git/agile-monkeys-test/src/test/java
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/ReleasePilotApplicationIT.java
+Read ReleasePilotApplicationIT.java
+That confirms the project's pattern: config/listener wiring classes are intentionally left untested at the Spring level (same as AuditLogConfig/AuditLogListener), relying on the plain-Java class's own IT (OutboxRelayIT) for behavior coverage and this single default-profile smoke test for wiring. I'll follow that convention rather than add a redundant test. Let me run the fast unit suite to confirm nothing broke.
+
+Bash
+IN
+./mvnw -q -o test 2>&1 | tail -100
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+21:21:54.305 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionQueryControllerTest]: PromotionQueryControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+21:21:54.380 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionQueryControllerTest
+21:21:54.382 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionQueryControllerTest]: PromotionQueryControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+21:21:54.391 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionQueryControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T21:21:54.548+02:00  INFO 219498 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Starting PromotionQueryControllerTest using Java 21.0.11 with PID 219498 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T21:21:54.549+02:00  INFO 219498 --- [           main] c.r.a.c.PromotionQueryControllerTest     : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T21:21:54.865+02:00  INFO 219498 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-26T21:21:54.865+02:00  INFO 219498 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-26T21:21:54.867+02:00  INFO 219498 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-07-26T21:21:54.879+02:00  INFO 219498 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Started PromotionQueryControllerTest in 0.463 seconds (process running for 1.544)
+2026-07-26T21:21:54.993+02:00  INFO 219498 --- [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionCommandControllerTest]: PromotionCommandControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-07-26T21:21:54.997+02:00  INFO 219498 --- [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionCommandControllerTest
+2026-07-26T21:21:54.998+02:00  INFO 219498 --- [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionCommandControllerTest]: PromotionCommandControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-07-26T21:21:54.999+02:00  INFO 219498 --- [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionCommandControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T21:21:55.013+02:00  INFO 219498 --- [           main] c.r.a.c.PromotionCommandControllerTest   : Starting PromotionCommandControllerTest using Java 21.0.11 with PID 219498 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T21:21:55.014+02:00  INFO 219498 --- [           main] c.r.a.c.PromotionCommandControllerTest   : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T21:21:55.117+02:00  INFO 219498 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-26T21:21:55.117+02:00  INFO 219498 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-26T21:21:55.117+02:00  INFO 219498 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-07-26T21:21:55.121+02:00  INFO 219498 --- [           main] c.r.a.c.PromotionCommandControllerTest   : Started PromotionCommandControllerTest in 0.119 seconds (process running for 1.786)
+Bash
+IN
+./mvnw -q -o test 2>&1 | tail -30; echo "EXIT:$?"
+
+OUT
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T21:22:00.714+02:00  INFO 219800 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Starting PromotionQueryControllerTest using Java 21.0.11 with PID 219800 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T21:22:00.715+02:00  INFO 219800 --- [           main] c.r.a.c.PromotionQueryControllerTest     : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T21:22:01.032+02:00  INFO 219800 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-26T21:22:01.033+02:00  INFO 219800 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-26T21:22:01.034+02:00  INFO 219800 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-07-26T21:22:01.046+02:00  INFO 219800 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Started PromotionQueryControllerTest in 0.464 seconds (process running for 1.5)
+2026-07-26T21:22:01.174+02:00  INFO 219800 --- [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionCommandControllerTest]: PromotionCommandControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-07-26T21:22:01.177+02:00  INFO 219800 --- [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionCommandControllerTest
+2026-07-26T21:22:01.178+02:00  INFO 219800 --- [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionCommandControllerTest]: PromotionCommandControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-07-26T21:22:01.179+02:00  INFO 219800 --- [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionCommandControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T21:22:01.194+02:00  INFO 219800 --- [           main] c.r.a.c.PromotionCommandControllerTest   : Starting PromotionCommandControllerTest using Java 21.0.11 with PID 219800 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T21:22:01.194+02:00  INFO 219800 --- [           main] c.r.a.c.PromotionCommandControllerTest   : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T21:22:01.298+02:00  INFO 219800 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-26T21:22:01.298+02:00  INFO 219800 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-26T21:22:01.298+02:00  INFO 219800 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-07-26T21:22:01.302+02:00  INFO 219800 --- [           main] c.r.a.c.PromotionCommandControllerTest   : Started PromotionCommandControllerTest in 0.12 seconds (process running for 1.756)
+EXIT:0
+All unit tests pass (Testcontainers *IT tests are skipped by mvnw test, as documented — they run under mvnw verify). Summary of the caller I added:
+
+OutboxRelayConfig.java — @Configuration @Profile("outbox-relay") wiring the OutboxRelay bean, mirroring AuditLogConfig/ReadModelProjectorConfig.
+OutboxRelayScheduler.java — @Component @Profile("outbox-relay"), @Scheduled(fixedDelay = 1000) calling relayPendingEvents() — the actual caller.
+application.yml — added an outbox-relay profile document (web-application-type: none), same shape as the other two consumer profiles.
+docker-compose.yml — added an outbox-relay service, deployed as its own container like read-model-projector/audit-log-consumer.
+This keeps OutboxRelay itself framework-free (per its own javadoc) while running it as a decoupled poll-loop process, per SPECS §5.1/§8. No new test was added for the wiring classes since the project's existing convention (AuditLogConfig/AuditLogListener) deliberately leaves thin Spring-wiring untested, relying on OutboxRelayIT for behavior and ReleasePilotApplicationIT for context-load smoke testing.
+
