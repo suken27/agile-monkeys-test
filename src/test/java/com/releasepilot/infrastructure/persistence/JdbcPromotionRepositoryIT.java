@@ -17,9 +17,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 
 import java.util.List;
 
@@ -39,7 +40,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class JdbcPromotionRepositoryIT {
 
 	@Container
-	static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+	static final PostgreSQLContainer POSTGRES =
+			new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
 
 	private static HikariDataSource dataSource;
 	private static JdbcPromotionRepository repository;
@@ -131,7 +133,7 @@ class JdbcPromotionRepositoryIT {
 
 		List<Promotion> found = repository.findActivePromotionsForTarget(applicationId, Environment.DEV);
 
-		assertThat(found).extracting(Promotion::id).containsExactly(active.id());
+		assertThat(found).extracting(promotion -> promotion.id()).containsExactly(active.id());
 	}
 
 	@Test

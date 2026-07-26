@@ -55,12 +55,12 @@ public class JdbcPromotionRepository implements PromotionRepositoryPort {
 				promotion.id().value(),
 				promotion.applicationId().value(),
 				promotion.version().value(),
-				promotion.fromEnvironment().map(Enum::name).orElse(null),
+				promotion.fromEnvironment().map(env -> env.name()).orElse(null),
 				promotion.targetEnvironment().name(),
 				promotion.requestedBy().userId(),
 				promotion.requestedBy().role().name(),
 				promotion.status().name(),
-				promotion.approvedBy().map(Actor::userId).orElse(null),
+				promotion.approvedBy().map(actor -> actor.userId()).orElse(null),
 				promotion.approvedBy().map(actor -> actor.role().name()).orElse(null));
 	}
 
@@ -97,9 +97,9 @@ public class JdbcPromotionRepository implements PromotionRepositoryPort {
 						PromotionStatus.COMPLETED.name())
 				.stream()
 				.map(Environment::valueOf)
-				.max(Comparator.comparingInt(Enum::ordinal));
+				.max(Comparator.naturalOrder());
 	}
-
+	
 	private static Promotion mapRow(ResultSet rs, int rowNum) throws SQLException {
 		String fromEnvironment = rs.getString("from_environment");
 		String approvedByUserId = rs.getString("approved_by_user_id");
