@@ -1,6 +1,7 @@
 package com.releasepilot.domain.promotion;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -31,5 +32,17 @@ public record DomainEvent(
 				applicationId,
 				actingActor.userId(),
 				Map.copyOf(payload));
+	}
+
+	/**
+	 * Returns a copy of this event with {@code additionalPayload} merged in. Used by command
+	 * handlers to enrich an event with data only available after the aggregate transition — e.g.
+	 * {@code DeploymentStarted}'s {@code deploymentRef}, only known once {@code DeploymentPort} has
+	 * been called (SPECS §5).
+	 */
+	public DomainEvent withPayload(Map<String, Object> additionalPayload) {
+		Map<String, Object> merged = new HashMap<>(payload);
+		merged.putAll(additionalPayload);
+		return new DomainEvent(eventId, eventType, occurredAt, promotionId, applicationId, actingUser, Map.copyOf(merged));
 	}
 }

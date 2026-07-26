@@ -6,7 +6,9 @@ import com.releasepilot.domain.promotion.errors.InvalidTransitionError;
 import com.releasepilot.domain.promotion.errors.PromotionAlreadyTerminalError;
 import com.releasepilot.domain.promotion.errors.UnauthorizedApproverError;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -22,6 +24,13 @@ import java.util.Optional;
  */
 public final class Promotion {
 
+	public static final String EVENT_PROMOTION_REQUESTED = "PromotionRequested";
+	public static final String EVENT_PROMOTION_APPROVED = "PromotionApproved";
+	public static final String EVENT_DEPLOYMENT_STARTED = "DeploymentStarted";
+	public static final String EVENT_PROMOTION_COMPLETED = "PromotionCompleted";
+	public static final String EVENT_PROMOTION_ROLLED_BACK = "PromotionRolledBack";
+	public static final String EVENT_PROMOTION_CANCELLED = "PromotionCancelled";
+
 	private final PromotionId id;
 	private final ApplicationId applicationId;
 	private final Version version;
@@ -30,6 +39,13 @@ public final class Promotion {
 	private final Actor requestedBy;
 	private PromotionStatus status;
 	private Actor approvedBy;
+
+	/**
+	 * Domain events recorded for transitions applied to this instance since the last
+	 * {@link #pullDomainEvents()} call. Never persisted and never populated by {@link #reconstitute},
+	 * since rehydrating a promotion from storage is not a new transition.
+	 */
+	private final List<DomainEvent> pendingEvents = new ArrayList<>();
 
 	private Promotion(
 			PromotionId id,
@@ -83,9 +99,19 @@ public final class Promotion {
 			throw new DuplicatePromotionInProgressError(applicationId, targetEnvironment);
 		}
 
-		return new Promotion(
+		Promotion promotion = new Promotion(
 				id, applicationId, version, lastCompletedEnvironment, targetEnvironment, requestedBy,
 				PromotionStatus.REQUESTED);
+
+		Map<String, Object> payload = lastCompletedEnvironment == null
+				? Map.of("version", version.value(), "targetEnvironment", targetEnvironment.name())
+				: Map.of(
+						"version", version.value(),
+						"fromEnvironment", lastCompletedEnvironment.name(),
+						"targetEnvironment", targetEnvironment.name());
+		promotion.recordEvent(EVENT_PROMOTION_REQUESTED, requestedBy, payload);
+
+		return promotion;
 	}
 
 	/**
@@ -120,14 +146,22 @@ public final class Promotion {
 		}
 		this.status = PromotionStatus.APPROVED;
 		this.approvedBy = approver;
+		recordEvent(EVENT_PROMOTION_APPROVED, approver, Map.of("approvedBy", approver.userId()));
 	}
 
+	/**
+	 * The {@code deploymentRef} extra payload field (SPECS §5) is not known here — it comes back
+	 * from {@link com.releasepilot.domain.ports.DeploymentPort#trigger} after this transition
+	 * succeeds — so the recorded event carries an empty payload and the command handler enriches
+	 * it via {@link DomainEvent#withPayload} once the deployment has actually been triggered.
+	 */
 	public void startDeployment(Actor actor) {
 		requireNotTerminal();
 		if (status != PromotionStatus.APPROVED) {
 			throw new InvalidTransitionError(status, "StartDeployment");
 		}
 		this.status = PromotionStatus.IN_PROGRESS;
+		recordEvent(EVENT_DEPLOYMENT_STARTED, actor, Map.of());
 	}
 
 	public void complete(Actor actor) {
@@ -136,6 +170,7 @@ public final class Promotion {
 			throw new InvalidTransitionError(status, "CompletePromotion");
 		}
 		this.status = PromotionStatus.COMPLETED;
+		recordEvent(EVENT_PROMOTION_COMPLETED, actor, Map.of());
 	}
 
 	public void rollback(Actor actor) {
@@ -144,6 +179,7 @@ public final class Promotion {
 			throw new InvalidTransitionError(status, "RollbackPromotion");
 		}
 		this.status = PromotionStatus.ROLLED_BACK;
+		recordEvent(EVENT_PROMOTION_ROLLED_BACK, actor, Map.of());
 	}
 
 	/** Invariant #4/#5: cancellation is only possible before deployment has started. */
@@ -153,12 +189,29 @@ public final class Promotion {
 			throw new InvalidTransitionError(status, "CancelPromotion");
 		}
 		this.status = PromotionStatus.CANCELLED;
+		recordEvent(EVENT_PROMOTION_CANCELLED, actor, Map.of());
 	}
 
 	private void requireNotTerminal() {
 		if (status.isTerminal()) {
 			throw new PromotionAlreadyTerminalError(status);
 		}
+	}
+
+	private void recordEvent(String eventType, Actor actingActor, Map<String, Object> payload) {
+		pendingEvents.add(DomainEvent.of(eventType, id, applicationId, actingActor, payload));
+	}
+
+	/**
+	 * Returns the domain events recorded by transitions applied since the last call, then clears
+	 * them. The application layer calls this right after persisting the aggregate's new state, and
+	 * publishes what it returns through {@code EventPublisherPort} — the transactional-outbox
+	 * adapter writes the event row in the same DB transaction as the state write (SPECS §5.1).
+	 */
+	public List<DomainEvent> pullDomainEvents() {
+		List<DomainEvent> events = List.copyOf(pendingEvents);
+		pendingEvents.clear();
+		return events;
 	}
 
 	public PromotionId id() {

@@ -167,6 +167,48 @@ command handlers, so `ReleasePilotApplication` excludes
 `DataSourceAutoConfiguration` for now and the adapter is exercised directly
 by `JdbcPromotionRepositoryIT` (see "Persistence integration tests" above).
 
+## Event publishing (transactional outbox)
+
+Every guarded transition on `Promotion` (`request`, `approve`, `startDeployment`,
+`complete`, `rollback`, `cancel`) records the domain event SPECS.md §5 assigns
+it — `PromotionRequested`, `PromotionApproved`, `DeploymentStarted`,
+`PromotionCompleted`, `PromotionRolledBack`, `PromotionCancelled` — on the
+aggregate itself, in a pending list that never gets persisted. Nothing about
+recording an event depends on infrastructure: the aggregate stays exactly as
+easy to unit-test as before (`PromotionTest`'s "Domain events" cases assert
+against `pullDomainEvents()` with no ports, no database, no broker).
+
+`PromotionCommandService`, the command handler for all six commands, calls
+`Promotion.pullDomainEvents()` right after `PromotionRepositoryPort.save(...)`
+in every single handler method, and publishes what it gets back through
+`EventPublisherPort` (`domain/ports/`) — the port the domain defines for "hand
+this event off for reliable delivery." (`StartDeployment` is the one
+exception worth calling out: `DeploymentStarted`'s `deploymentRef` payload
+field isn't known until *after* the transition, once `DeploymentPort.trigger`
+returns, so the handler enriches the pulled event with
+`DomainEvent.withPayload(...)` before publishing it.)
+
+`EventPublisherPort` is implemented by `OutboxEventPublisher`
+(`infrastructure/persistence/`): a plain `JdbcTemplate` insert into the
+`outbox_events` table (`db/migration/V2__create_outbox_events_table.sql`),
+using the same connection the aggregate's own save uses, so the two writes
+commit or roll back together — the transactional-outbox pattern from
+SPECS.md §5.1. The API can therefore respond as soon as that transaction
+commits; nothing about delivering the event to the broker blocks the request.
+
+Delivery to the broker is a second, decoupled step: `OutboxRelay`
+(`infrastructure/queue/`) polls `outbox_events` for rows with
+`published_at IS NULL`, publishes each to the `promotion.events` fanout
+RabbitMQ exchange via Spring AMQP's `RabbitTemplate`, and marks the row sent.
+Using a fanout exchange means the relay never needs to know which or how many
+consumers exist — each future consumer (audit log, read-model projector,
+notifications, ...) declares and binds its own queue. Like
+`JdbcPromotionRepository`, neither `OutboxEventPublisher` nor `OutboxRelay` is
+wired into the Spring context yet; both are exercised directly by
+`OutboxEventPublisherIT` and `OutboxRelayIT` (Testcontainers Postgres +
+RabbitMQ — the latter proves an event genuinely survives the outbox → queue
+hop and isn't redelivered on a second relay pass).
+
 ## Project structure
 
 ```

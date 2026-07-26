@@ -1,0 +1,1993 @@
+
+SPECS.md
+create the event publishing architecture. follow @originalDescription.md and @SPECS.md guidelines, maintain hexagonal architecture and DDD, the promotion aggregate shall use the event port after every command, implement the box pattern indicated in @SPECS.md
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test -type f -name "*.java" | grep -v /target/ | sort
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands/PromotionCommandPort.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands/PromotionCommandService.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands/PromotionNotFoundException.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/DeploymentPort.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/DeploymentRef.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/NotificationPort.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/PromotionRepositoryPort.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/WorkItem.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/Actor.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/ApplicationId.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/DomainEvent.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/Environment.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/DomainError.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/DuplicatePromotionInProgressError.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/EnvironmentSkippedError.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/InvalidTransitionError.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/PromotionAlreadyTerminalError.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/UnauthorizedApproverError.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/PromotionId.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/Promotion.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/PromotionStatus.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/Role.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/Version.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepository.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/ReleasePilotApplication.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/domain/promotion/PromotionTest.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepositoryIT.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/ReleasePilotApplicationTests.java
+Read Promotion.java
+Read PromotionCommandService.java
+Read DomainEvent.java
+Read PromotionRepositoryPort.java
+Bash
+IN
+cat /home/juanjo/git/agile-monkeys-test/pom.xml
+
+OUT
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.0.7</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.releasepilot</groupId>
+	<artifactId>releasepilot</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>ReleasePilot</name>
+	<description>ReleasePilot promotion pipeline service</description>
+	<properties>
+		<java.version>21</java.version>
+	</properties>
+	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-jdbc</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>
+Bash
+IN
+cat /home/juanjo/git/agile-monkeys-test/docker-compose.yml
+
+OUT
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: releasepilot
+      POSTGRES_USER: releasepilot
+      POSTGRES_PASSWORD: releasepilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U releasepilot -d releasepilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: releasepilot
+      RABBITMQ_DEFAULT_PASS: releasepilot
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: ghcr.io/suken27/agile-monkeys-test:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/releasepilot
+      SPRING_DATASOURCE_USERNAME: releasepilot
+      SPRING_DATASOURCE_PASSWORD: releasepilot
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: releasepilot
+      SPRING_RABBITMQ_PASSWORD: releasepilot
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test/src/main/resources -type f | sort; echo ---; cat /home/juanjo/git/agile-monkeys-test/src/main/resources/application.yml 2>/dev/null
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/resources/application.yml
+/home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration/V1__create_promotions_table.sql
+---
+spring:
+  application:
+    name: ReleasePilot
+Read V1__create_promotions_table.sql
+Read JdbcPromotionRepository.java
+Read JdbcPromotionRepositoryIT.java
+Read PromotionCommandServiceTest.java
+Bash
+IN
+cat src/main/java/com/releasepilot/domain/ports/DeploymentPort.java src/main/java/com/releasepilot/domain/ports/NotificationPort.java src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java src/main/java/com/releasepilot/application/commands/PromotionCommandPort.java src/main/java/com/releasepilot/domain/promotion/Actor.java src/main/java/com/releasepilot/domain/promotion/Role.java src/main/java/com/releasepilot/domain/promotion/PromotionStatus.java src/main/java/com/releasepilot/domain/promotion/Environment.java 2>&1
+
+OUT
+package com.releasepilot.domain.ports;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.Version;
+
+/**
+ * Output port: a capability the domain requires of the outside world to trigger a deployment.
+ * Implemented by an infrastructure adapter (e.g. an in-memory stub, or later a real CI/CD
+ * client); the domain and application layers depend only on this abstraction.
+ */
+public interface DeploymentPort {
+
+	DeploymentRef trigger(ApplicationId applicationId, Version version, Environment environment);
+}
+package com.releasepilot.domain.ports;
+
+import com.releasepilot.domain.promotion.DomainEvent;
+
+/**
+ * Output port: a capability the domain requires of the outside world to alert on terminal-state
+ * events (Completed, RolledBack, Cancelled). Implemented by an infrastructure adapter.
+ */
+public interface NotificationPort {
+
+	void notify(DomainEvent event);
+}
+package com.releasepilot.domain.ports;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Version;
+
+import java.util.List;
+
+/**
+ * Output port: a capability the domain requires of the outside world to fetch the work items
+ * linked to an application version (e.g. for the promotion detail query or the release-notes
+ * agent). Implemented by an infrastructure adapter.
+ */
+public interface IssueTrackerPort {
+
+	List<WorkItem> getLinkedWorkItems(ApplicationId applicationId, Version version);
+}
+package com.releasepilot.application.commands;
+
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Version;
+
+/**
+ * Input port: the seam through which driving adapters (HTTP controllers) reach the write side.
+ * One method per command in the spec (§4); each loads/persists the {@code Promotion} aggregate
+ * and lets it enforce its own invariants, never re-implementing business rules here.
+ */
+public interface PromotionCommandPort {
+
+	PromotionId requestPromotion(
+			ApplicationId applicationId, Version version, Environment targetEnvironment, Actor requestedBy);
+
+	PromotionId approvePromotion(PromotionId promotionId, Actor approvedBy);
+
+	PromotionId startDeployment(PromotionId promotionId, Actor startedBy);
+
+	PromotionId completePromotion(PromotionId promotionId, Actor completedBy);
+
+	PromotionId rollbackPromotion(PromotionId promotionId, Actor rolledBackBy);
+
+	PromotionId cancelPromotion(PromotionId promotionId, Actor cancelledBy);
+}
+package com.releasepilot.domain.promotion;
+
+import java.util.Objects;
+
+/**
+ * The user performing a command, and the role they act under.
+ */
+public record Actor(String userId, Role role) {
+
+	public Actor {
+		Objects.requireNonNull(userId, "userId must not be null");
+		if (userId.isBlank()) {
+			throw new IllegalArgumentException("userId must not be blank");
+		}
+		Objects.requireNonNull(role, "role must not be null");
+	}
+
+	public boolean isApprover() {
+		return role == Role.APPROVER;
+	}
+}
+package com.releasepilot.domain.promotion;
+
+public enum Role {
+	REQUESTER,
+	APPROVER
+}
+package com.releasepilot.domain.promotion;
+
+/**
+ * The lifecycle state of a {@link Promotion}. Completed, RolledBack and Cancelled are terminal:
+ * no further transitions are possible once a promotion reaches one of them.
+ */
+public enum PromotionStatus {
+
+	REQUESTED,
+	APPROVED,
+	IN_PROGRESS,
+	COMPLETED,
+	ROLLED_BACK,
+	CANCELLED;
+
+	public boolean isTerminal() {
+		return this == COMPLETED || this == ROLLED_BACK || this == CANCELLED;
+	}
+}
+package com.releasepilot.domain.promotion;
+
+import java.util.Optional;
+
+/**
+ * A stage in the deployment pipeline. Fixed, ordered: dev -> staging -> production.
+ */
+public enum Environment {
+
+	DEV,
+	STAGING,
+	PRODUCTION;
+
+	public static Environment first() {
+		return DEV;
+	}
+
+	public Optional<Environment> next() {
+		return switch (this) {
+			case DEV -> Optional.of(STAGING);
+			case STAGING -> Optional.of(PRODUCTION);
+			case PRODUCTION -> Optional.empty();
+		};
+	}
+
+	public Optional<Environment> previous() {
+		return switch (this) {
+			case DEV -> Optional.empty();
+			case STAGING -> Optional.of(DEV);
+			case PRODUCTION -> Optional.of(STAGING);
+		};
+	}
+}
+Bash
+IN
+cat README.md 2>/dev/null | head -150
+
+OUT
+# ReleasePilot
+
+ReleasePilot is an internal platform that moves an application version through
+an ordered pipeline of deployment environments (`dev → staging → production`).
+It is modeled with **DDD** (a `Promotion` aggregate that owns all business
+rules), **CQRS** (separate write and read paths), and **domain events** (every
+state transition is published and consumed asynchronously).
+
+The API is intentionally thin: it validates input and translates HTTP into
+commands/queries. All business logic — legality of a transition, who can
+approve what, immutability after a terminal state — lives inside the
+aggregate. Rule violations are domain errors mapped to 4xx responses, never
+uncaught exceptions.
+
+See [SPECS.md](SPECS.md) for the full technical specification.
+
+## Tech stack
+
+- Java 21
+- Spring Boot 4 (Spring Web)
+- Maven (via the included Maven Wrapper)
+
+## Prerequisites
+
+- Java 21 (JDK)
+
+No local Maven installation is required — this project uses the Maven
+Wrapper (`mvnw`).
+
+## Running the application
+
+From the project root:
+
+```bash
+./mvnw spring-boot:run
+```
+
+On Windows:
+
+```bash
+mvnw.cmd spring-boot:run
+```
+
+The application starts on [http://localhost:8080](http://localhost:8080).
+
+## Building
+
+```bash
+./mvnw clean package
+```
+
+Produces an executable jar in `target/`, which can be run with:
+
+```bash
+java -jar target/releasepilot-0.0.1-SNAPSHOT.jar
+```
+
+## Running tests
+
+```bash
+./mvnw test
+```
+
+This runs the unit test suite only (aggregate + command-service tests) — it needs no database,
+Docker, or other infrastructure, and finishes in a few seconds. Persistence integration tests
+are excluded by naming convention (`*Test` vs `*IT`, see below).
+
+### Persistence integration tests
+
+`JdbcPromotionRepositoryIT` (`src/test/java/.../infrastructure/persistence/`) exercises
+`JdbcPromotionRepository` against a real, disposable PostgreSQL instance started automatically by
+[Testcontainers](https://testcontainers.com/) — no manual database setup is required, but
+**Docker must be installed and running** (the container image `postgres:16-alpine` is pulled and
+started/stopped per test run).
+
+It's named `*IT` rather than `*Test` specifically so the default `./mvnw test` (Surefire) skips
+it; only Maven's `verify` lifecycle phase (bound to the Failsafe plugin) runs it:
+
+```bash
+./mvnw verify
+```
+
+To run just the integration tests without the rest of the `verify` lifecycle:
+
+```bash
+./mvnw failsafe:integration-test
+```
+
+What it proves: the adapter's SQL round-trips every field of a `Promotion` (including the
+optional `fromEnvironment`/`approvedBy`), the aggregate can keep applying its own guarded
+transitions across a save → reload cycle, and the two invariant-scoped queries
+(`findActivePromotionsForTarget`, `findLastCompletedEnvironment`) filter correctly at the SQL
+level — including a couple of tests that replay the exact repository-then-aggregate call sequence
+`PromotionCommandService` uses, so a passing run means the adapter and the domain layer genuinely
+agree on how a `Promotion` invariant is enforced across a reload, not just that each side works in
+isolation.
+
+## CI/CD
+
+Two GitHub Actions workflows live in `.github/workflows/`:
+
+- **`ci.yml`** — runs on every push, on three independent jobs: `build`
+  (`./mvnw clean compile`), `unit-tests` (`./mvnw test`) and
+  `integration-tests` (`./mvnw verify`, which needs the Docker daemon that
+  GitHub-hosted runners already provide, for Testcontainers). Any job failure
+  fails the pipeline.
+- **`release.yml`** — runs on every push to `main` (i.e. once a branch is
+  merged). It re-runs `ci.yml` in full via `workflow_call`, and only if that
+  passes, builds the image from the [Dockerfile](Dockerfile) and pushes it to
+  the GitHub Container Registry as `ghcr.io/<owner>/<repo>:latest` and
+  `ghcr.io/<owner>/<repo>:sha-<commit>`.
+
+## The `Promotion` aggregate lifecycle
+
+A `Promotion` moves one application version one step through the pipeline
+(`dev → staging → production`). Every transition is a guarded method on the
+aggregate itself — illegal transitions raise a domain error rather than
+silently mutating state or throwing an uncaught exception.
+
+```
+Requested ──approve──▶ Approved ──start──▶ InProgress ──complete──▶ Completed
+    │                      │                    │
+    │                      │                    └──rollback──▶ RolledBack
+    │                      │
+    └──────cancel──────────┴──────cancel────────▶ Cancelled
+```
+
+| State | Reached via | Guards enforced on entry |
+|---|---|---|
+| `Requested` | `Promotion.request(...)` | target environment is the immediate next step after the version's last completed environment (no skipping); no other non-terminal promotion already targets the same `(application, environment)` pair |
+| `Approved` | `approve(actor)` | promotion is not terminal and is currently `Requested`; `actor` holds the `approver` role |
+| `InProgress` | `startDeployment(actor)` | promotion is not terminal and is currently `Approved` |
+| `Completed` *(terminal)* | `complete(actor)` | promotion is not terminal and is currently `InProgress` |
+| `RolledBack` *(terminal)* | `rollback(actor)` | promotion is not terminal and is currently `InProgress` |
+| `Cancelled` *(terminal)* | `cancel(actor)` | promotion is not terminal and is currently `Requested` or `Approved` |
+
+Once a promotion reaches a terminal state (`Completed`, `RolledBack`,
+`Cancelled`) every subsequent command is rejected with
+`PromotionAlreadyTerminalError` — no field on a terminal promotion can change.
+Any other out-of-order command (e.g. approving a promotion that is already
+`Approved`) is rejected with `InvalidTransitionError`. Both are domain errors
+(`domain/promotion/errors/`), never uncaught exceptions.
+
+Checking the "no skipping" and "no duplicate in-flight promotion" invariants
+requires knowledge of sibling `Promotion` instances for the same application,
+so the application layer (`PromotionCommandService`, the implementation of
+the `PromotionCommandPort` input port) fetches that sibling data and passes
+it into `Promotion.request(...)` — but the aggregate itself still makes the
+decision and throws the domain error if a rule is violated.
+Bash
+IN
+grep -rln "@Configuration\|@Bean\|@Service\|@Component\|@Transactional\|@RestController" /home/juanjo/git/agile-monkeys-test/src/main 2>/dev/null; echo ---; cat /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/DeploymentRef.java; echo ---; cat /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/ReleasePilotApplication.java; echo ---; ls /home/juanjo/git/agile-monkeys-test/.github/workflows/ 2>/dev/null
+
+OUT
+---
+package com.releasepilot.domain.ports;
+
+/** Opaque reference to a triggered deployment, returned by {@link DeploymentPort}. */
+public record DeploymentRef(String value) {
+}
+---
+package com.releasepilot;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class ReleasePilotApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(ReleasePilotApplication.class, args);
+	}
+
+}
+---
+ci.yml
+release.yml
+Bash
+IN
+./mvnw -q -o dependency:tree 2>&1 | grep -i jackson | head -20; echo "---amqp---"; ./mvnw -q -o dependency:tree 2>&1 | grep -i amqp | head -20
+
+OUT
+---amqp---
+Bash
+IN
+timeout 60 ./mvnw -q dependency:tree 2>&1 | tail -100
+
+OUT
+(Bash completed with no output)
+Bash
+IN
+timeout 90 ./mvnw dependency:tree 2>&1 | tail -150
+
+OUT
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------< com.releasepilot:releasepilot >--------------------
+[INFO] Building ReleasePilot 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- dependency:3.9.0:tree (default-cli) @ releasepilot ---
+[INFO] com.releasepilot:releasepilot:jar:0.0.1-SNAPSHOT
+[INFO] +- org.springframework.boot:spring-boot-starter-webmvc:jar:4.0.7:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter:jar:4.0.7:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-logging:jar:4.0.7:compile
+[INFO] |  |  |  +- ch.qos.logback:logback-classic:jar:1.5.34:compile
+[INFO] |  |  |  |  \- ch.qos.logback:logback-core:jar:1.5.34:compile
+[INFO] |  |  |  +- org.apache.logging.log4j:log4j-to-slf4j:jar:2.25.4:compile
+[INFO] |  |  |  |  \- org.apache.logging.log4j:log4j-api:jar:2.25.4:compile
+[INFO] |  |  |  \- org.slf4j:jul-to-slf4j:jar:2.0.18:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-autoconfigure:jar:4.0.7:compile
+[INFO] |  |  +- jakarta.annotation:jakarta.annotation-api:jar:3.0.0:compile
+[INFO] |  |  \- org.yaml:snakeyaml:jar:2.5:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter-jackson:jar:4.0.7:compile
+[INFO] |  |  \- org.springframework.boot:spring-boot-jackson:jar:4.0.7:compile
+[INFO] |  |     \- tools.jackson.core:jackson-databind:jar:3.1.4:compile
+[INFO] |  |        \- tools.jackson.core:jackson-core:jar:3.1.4:compile
+[INFO] |  +- org.springframework.boot:spring-boot-starter-tomcat:jar:4.0.7:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-starter-tomcat-runtime:jar:4.0.7:compile
+[INFO] |  |  |  +- org.apache.tomcat.embed:tomcat-embed-core:jar:11.0.22:compile
+[INFO] |  |  |  +- org.apache.tomcat.embed:tomcat-embed-el:jar:11.0.22:compile
+[INFO] |  |  |  \- org.apache.tomcat.embed:tomcat-embed-websocket:jar:11.0.22:compile
+[INFO] |  |  \- org.springframework.boot:spring-boot-tomcat:jar:4.0.7:compile
+[INFO] |  +- org.springframework.boot:spring-boot-http-converter:jar:4.0.7:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot:jar:4.0.7:compile
+[INFO] |  |  |  \- org.springframework:spring-context:jar:7.0.8:compile
+[INFO] |  |  \- org.springframework:spring-web:jar:7.0.8:compile
+[INFO] |  |     +- org.springframework:spring-beans:jar:7.0.8:compile
+[INFO] |  |     \- io.micrometer:micrometer-observation:jar:1.16.6:compile
+[INFO] |  |        \- io.micrometer:micrometer-commons:jar:1.16.6:compile
+[INFO] |  \- org.springframework.boot:spring-boot-webmvc:jar:4.0.7:compile
+[INFO] |     +- org.springframework.boot:spring-boot-servlet:jar:4.0.7:compile
+[INFO] |     \- org.springframework:spring-webmvc:jar:7.0.8:compile
+[INFO] |        +- org.springframework:spring-aop:jar:7.0.8:compile
+[INFO] |        \- org.springframework:spring-expression:jar:7.0.8:compile
+[INFO] +- org.springframework.boot:spring-boot-starter-webmvc-test:jar:4.0.7:test
+[INFO] |  +- org.springframework.boot:spring-boot-starter-jackson-test:jar:4.0.7:test
+[INFO] |  +- org.springframework.boot:spring-boot-starter-test:jar:4.0.7:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-test:jar:4.0.7:test
+[INFO] |  |  +- org.springframework.boot:spring-boot-test-autoconfigure:jar:4.0.7:test
+[INFO] |  |  +- com.jayway.jsonpath:json-path:jar:2.10.0:test
+[INFO] |  |  +- jakarta.xml.bind:jakarta.xml.bind-api:jar:4.0.5:test
+[INFO] |  |  |  \- jakarta.activation:jakarta.activation-api:jar:2.1.4:test
+[INFO] |  |  +- net.minidev:json-smart:jar:2.6.0:test
+[INFO] |  |  |  \- net.minidev:accessors-smart:jar:2.6.0:test
+[INFO] |  |  |     \- org.ow2.asm:asm:jar:9.7.1:test
+[INFO] |  |  +- org.assertj:assertj-core:jar:3.27.7:test
+[INFO] |  |  |  \- net.bytebuddy:byte-buddy:jar:1.17.8:test
+[INFO] |  |  +- org.awaitility:awaitility:jar:4.3.0:test
+[INFO] |  |  +- org.hamcrest:hamcrest:jar:3.0:test
+[INFO] |  |  +- org.junit.jupiter:junit-jupiter:jar:6.0.3:test
+[INFO] |  |  |  +- org.junit.jupiter:junit-jupiter-api:jar:6.0.3:test
+[INFO] |  |  |  |  +- org.opentest4j:opentest4j:jar:1.3.0:test
+[INFO] |  |  |  |  +- org.junit.platform:junit-platform-commons:jar:6.0.3:test
+[INFO] |  |  |  |  \- org.apiguardian:apiguardian-api:jar:1.1.2:test
+[INFO] |  |  |  +- org.junit.jupiter:junit-jupiter-params:jar:6.0.3:test
+[INFO] |  |  |  \- org.junit.jupiter:junit-jupiter-engine:jar:6.0.3:test
+[INFO] |  |  |     \- org.junit.platform:junit-platform-engine:jar:6.0.3:test
+[INFO] |  |  +- org.mockito:mockito-core:jar:5.20.0:test
+[INFO] |  |  |  +- net.bytebuddy:byte-buddy-agent:jar:1.17.8:test
+[INFO] |  |  |  \- org.objenesis:objenesis:jar:3.3:test
+[INFO] |  |  +- org.mockito:mockito-junit-jupiter:jar:5.20.0:test
+[INFO] |  |  +- org.skyscreamer:jsonassert:jar:1.5.3:test
+[INFO] |  |  |  \- com.vaadin.external.google:android-json:jar:0.0.20131108.vaadin1:test
+[INFO] |  |  +- org.springframework:spring-core:jar:7.0.8:compile
+[INFO] |  |  |  +- commons-logging:commons-logging:jar:1.3.6:compile
+[INFO] |  |  |  \- org.jspecify:jspecify:jar:1.0.0:compile
+[INFO] |  |  +- org.springframework:spring-test:jar:7.0.8:test
+[INFO] |  |  \- org.xmlunit:xmlunit-core:jar:2.10.4:test
+[INFO] |  +- org.springframework.boot:spring-boot-webmvc-test:jar:4.0.7:test
+[INFO] |  |  \- org.springframework.boot:spring-boot-web-server:jar:4.0.7:compile
+[INFO] |  \- org.springframework.boot:spring-boot-resttestclient:jar:4.0.7:test
+[INFO] +- org.springframework.boot:spring-boot-starter-jdbc:jar:4.0.7:compile
+[INFO] |  +- org.springframework.boot:spring-boot-jdbc:jar:4.0.7:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-sql:jar:4.0.7:compile
+[INFO] |  |  +- org.springframework.boot:spring-boot-transaction:jar:4.0.7:compile
+[INFO] |  |  |  +- org.springframework.boot:spring-boot-persistence:jar:4.0.7:compile
+[INFO] |  |  |  \- org.springframework:spring-tx:jar:7.0.8:compile
+[INFO] |  |  \- org.springframework:spring-jdbc:jar:7.0.8:compile
+[INFO] |  \- com.zaxxer:HikariCP:jar:7.0.2:compile
+[INFO] |     \- org.slf4j:slf4j-api:jar:2.0.18:compile
+[INFO] +- org.postgresql:postgresql:jar:42.7.11:runtime
+[INFO] +- org.flywaydb:flyway-core:jar:11.14.1:compile
+[INFO] |  \- com.fasterxml.jackson.core:jackson-databind:jar:2.21.4:compile
+[INFO] |     +- com.fasterxml.jackson.core:jackson-annotations:jar:2.21:compile
+[INFO] |     \- com.fasterxml.jackson.core:jackson-core:jar:2.21.4:compile
+[INFO] +- org.flywaydb:flyway-database-postgresql:jar:11.14.1:compile
+[INFO] +- org.testcontainers:testcontainers-junit-jupiter:jar:2.0.5:test
+[INFO] |  \- org.testcontainers:testcontainers:jar:2.0.5:test
+[INFO] |     +- org.apache.commons:commons-compress:jar:1.28.0:test
+[INFO] |     |  +- commons-codec:commons-codec:jar:1.19.0:test
+[INFO] |     |  +- commons-io:commons-io:jar:2.20.0:test
+[INFO] |     |  \- org.apache.commons:commons-lang3:jar:3.19.0:test
+[INFO] |     +- org.rnorth.duct-tape:duct-tape:jar:1.0.8:test
+[INFO] |     |  \- org.jetbrains:annotations:jar:17.0.0:test
+[INFO] |     +- com.github.docker-java:docker-java-api:jar:3.7.1:test
+[INFO] |     \- com.github.docker-java:docker-java-transport-zerodep:jar:3.7.1:test
+[INFO] |        +- com.github.docker-java:docker-java-transport:jar:3.7.1:test
+[INFO] |        \- net.java.dev.jna:jna:jar:5.18.1:test
+[INFO] \- org.testcontainers:testcontainers-postgresql:jar:2.0.5:test
+[INFO]    \- org.testcontainers:testcontainers-jdbc:jar:2.0.5:test
+[INFO]       \- org.testcontainers:testcontainers-database-commons:jar:2.0.5:test
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.545 s
+[INFO] Finished at: 2026-07-26T18:43:56+02:00
+[INFO] ------------------------------------------------------------------------
+Bash
+IN
+find ~/.m2 -iname "*jackson-databind*3.1.4*" -o -iname "*jackson-databind*3.1.4*sources*" 2>/dev/null | sort
+
+OUT
+/home/juanjo/.m2/repository/tools/jackson/core/jackson-databind/3.1.4/jackson-databind-3.1.4.jar
+/home/juanjo/.m2/repository/tools/jackson/core/jackson-databind/3.1.4/jackson-databind-3.1.4.jar.sha1
+/home/juanjo/.m2/repository/tools/jackson/core/jackson-databind/3.1.4/jackson-databind-3.1.4.pom
+/home/juanjo/.m2/repository/tools/jackson/core/jackson-databind/3.1.4/jackson-databind-3.1.4.pom.sha1
+Bash
+IN
+cd /tmp && mkdir -p jackson3-inspect && cd jackson3-inspect && javap -public -cp /home/juanjo/.m2/repository/tools/jackson/core/jackson-databind/3.1.4/jackson-databind-3.1.4.jar tools.jackson.databind.ObjectMapper 2>&1 | grep -E "writeValueAsString|readValue" | head -30
+
+OUT
+  public <T> T readValue(tools.jackson.core.JsonParser, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(tools.jackson.core.JsonParser, tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(tools.jackson.core.JsonParser, tools.jackson.core.type.ResolvedType) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(tools.jackson.core.JsonParser, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> tools.jackson.databind.MappingIterator<T> readValues(tools.jackson.core.JsonParser, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> tools.jackson.databind.MappingIterator<T> readValues(tools.jackson.core.JsonParser, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> tools.jackson.databind.MappingIterator<T> readValues(tools.jackson.core.JsonParser, tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.File, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.File, tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.File, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.nio.file.Path, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.nio.file.Path, tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.nio.file.Path, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.lang.String, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.lang.String, tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.lang.String, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.Reader, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.Reader, tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.Reader, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.InputStream, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.InputStream, tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.InputStream, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(byte[], java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(byte[], int, int, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(byte[], tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(byte[], int, int, tools.jackson.core.type.TypeReference<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(byte[], tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(byte[], int, int, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.DataInput, java.lang.Class<T>) throws tools.jackson.core.JacksonException;
+  public <T> T readValue(java.io.DataInput, tools.jackson.databind.JavaType) throws tools.jackson.core.JacksonException;
+Shell cwd was reset to /home/juanjo/git/agile-monkeys-test
+Bash
+IN
+javap -public -cp /home/juanjo/.m2/repository/tools/jackson/core/jackson-databind/3.1.4/jackson-databind-3.1.4.jar tools.jackson.databind.ObjectMapper 2>&1 | grep -E "writeValueAsString"
+
+OUT
+  public java.lang.String writeValueAsString(java.lang.Object) throws tools.jackson.core.JacksonException;
+Bash
+IN
+javap -public -cp /home/juanjo/.m2/repository/tools/jackson/core/jackson-databind/3.1.4/jackson-databind-3.1.4.jar tools.jackson.databind.ObjectMapper 2>&1 | grep -E "ObjectMapper\(|builder"
+
+OUT
+  public tools.jackson.databind.ObjectMapper();
+  public tools.jackson.databind.ObjectMapper(tools.jackson.core.TokenStreamFactory);
+Read pom.xml
+Edit pom.xml
+Added 5 lines
+Edit pom.xml
+Added 6 lines
+Bash
+IN
+timeout 90 ./mvnw -q dependency:resolve 2>&1 | tail -80
+
+OUT
+(Bash completed with no output)
+Dependencies resolved cleanly. Let me check the AMQP starter version pulled in and confirm the RabbitTemplate API shape.
+
+Bash
+IN
+timeout 90 ./mvnw dependency:tree 2>&1 | grep -iE "amqp|rabbit"
+
+OUT
+[INFO] +- org.springframework.boot:spring-boot-starter-amqp:jar:4.0.7:compile
+[INFO] |  \- org.springframework.boot:spring-boot-amqp:jar:4.0.7:compile
+[INFO] |     \- org.springframework.amqp:spring-rabbit:jar:4.0.4:compile
+[INFO] |        +- org.springframework.amqp:spring-amqp:jar:4.0.4:compile
+[INFO] |        \- com.rabbitmq:amqp-client:jar:5.27.1:compile
+[INFO] \- org.testcontainers:testcontainers-rabbitmq:jar:2.0.5:test
+Bash
+IN
+javap -public -cp /home/juanjo/.m2/repository/tools/jackson/core/jackson-databind/3.1.4/jackson-databind-3.1.4.jar tools.jackson.core.JacksonException 2>&1 | head -5
+find ~/.m2 -iname "jackson-core-3*.jar" | head -3
+
+OUT
+Error: class not found: tools.jackson.core.JacksonException
+/home/juanjo/.m2/repository/tools/jackson/core/jackson-core/3.1.4/jackson-core-3.1.4.jar
+Bash
+IN
+javap -public -cp /home/juanjo/.m2/repository/tools/jackson/core/jackson-core/3.1.4/jackson-core-3.1.4.jar tools.jackson.core.JacksonException 2>&1 | head -5
+
+OUT
+Compiled from "JacksonException.java"
+public class tools.jackson.core.JacksonException extends java.lang.RuntimeException {
+  public tools.jackson.core.JacksonException withCause(java.lang.Throwable);
+  public tools.jackson.core.JacksonException clearLocation();
+  public static tools.jackson.core.JacksonException wrapWithPath(java.lang.Throwable, java.lang.Object, java.lang.String);
+Bash
+IN
+find ~/.m2 -iname "spring-amqp-4.0.4.jar" 2>/dev/null
+jar=$(find ~/.m2 -iname "spring-amqp-4.0.4.jar" | head -1)
+javap -public -cp "$jar" org.springframework.amqp.core.MessageBuilder 2>&1 | grep -E "withBody|build|setContentType" | head -10
+javap -public -cp "$jar" org.springframework.amqp.core.MessageProperties 2>&1 | grep -i "CONTENT_TYPE_JSON"
+
+OUT
+/home/juanjo/.m2/repository/org/springframework/amqp/spring-amqp/4.0.4/spring-amqp-4.0.4.jar
+  public static org.springframework.amqp.core.MessageBuilder withBody(byte[]);
+  public static org.springframework.amqp.core.MessageBuilder withBody(byte[], int, int);
+  public org.springframework.amqp.core.Message build();
+  public java.lang.Object build();
+  public static final java.lang.String CONTENT_TYPE_JSON;
+  public static final java.lang.String CONTENT_TYPE_JSON_ALT;
+Bash
+IN
+jar=$(find ~/.m2 -iname "spring-amqp-4.0.4.jar" | head -1)
+javap -public -cp "$jar" org.springframework.amqp.core.MessageBuilder 2>&1 | head -60
+
+OUT
+Compiled from "MessageBuilder.java"
+public final class org.springframework.amqp.core.MessageBuilder extends org.springframework.amqp.core.MessageBuilderSupport<org.springframework.amqp.core.Message> {
+  public static org.springframework.amqp.core.MessageBuilder withBody(byte[]);
+  public static org.springframework.amqp.core.MessageBuilder withClonedBody(byte[]);
+  public static org.springframework.amqp.core.MessageBuilder withBody(byte[], int, int);
+  public static org.springframework.amqp.core.MessageBuilder fromMessage(org.springframework.amqp.core.Message);
+  public static org.springframework.amqp.core.MessageBuilder fromClonedMessage(org.springframework.amqp.core.Message);
+  public org.springframework.amqp.core.MessageBuilder andProperties(org.springframework.amqp.core.MessageProperties);
+  public org.springframework.amqp.core.Message build();
+  public java.lang.Object build();
+}
+Bash
+IN
+jar=$(find ~/.m2 -iname "spring-amqp-4.0.4.jar" | head -1)
+javap -public -cp "$jar" org.springframework.amqp.core.MessageBuilderSupport 2>&1 | grep -i "contentType"
+
+OUT
+  public org.springframework.amqp.core.MessageBuilderSupport<T> setContentType(java.lang.String);
+  public org.springframework.amqp.core.MessageBuilderSupport<T> setContentTypeIfAbsentOrDefault(java.lang.String);
+Bash
+IN
+jar=$(find ~/.m2 -iname "spring-rabbit-4.0.4.jar" | head -1)
+javap -public -cp "$jar" org.springframework.amqp.rabbit.core.RabbitTemplate 2>&1 | grep -E "public void send|public.*RabbitTemplate\(" | head -20
+
+OUT
+  public org.springframework.amqp.rabbit.core.RabbitTemplate();
+  public org.springframework.amqp.rabbit.core.RabbitTemplate(org.springframework.amqp.rabbit.connection.ConnectionFactory);
+  public void send(org.springframework.amqp.core.Message) throws org.springframework.amqp.AmqpException;
+  public void send(java.lang.String, org.springframework.amqp.core.Message) throws org.springframework.amqp.AmqpException;
+  public void send(java.lang.String, org.springframework.amqp.core.Message, org.springframework.amqp.rabbit.connection.CorrelationData) throws org.springframework.amqp.AmqpException;
+  public void send(java.lang.String, java.lang.String, org.springframework.amqp.core.Message) throws org.springframework.amqp.AmqpException;
+  public void send(java.lang.String, java.lang.String, org.springframework.amqp.core.Message, org.springframework.amqp.rabbit.connection.CorrelationData) throws org.springframework.amqp.AmqpException;
+Bash
+IN
+jar=$(find ~/.m2 -iname "spring-rabbit-4.0.4.jar" | head -1)
+javap -public -cp "$jar" org.springframework.amqp.rabbit.core.RabbitTemplate 2>&1 | grep -E "public.*receive"
+echo ---
+javap -public -cp "$jar" org.springframework.amqp.rabbit.core.RabbitAdmin 2>&1 | grep -E "declare|public.*RabbitAdmin\("
+
+OUT
+  public org.springframework.amqp.core.Message receive() throws org.springframework.amqp.AmqpException;
+  public org.springframework.amqp.core.Message receive(java.lang.String);
+  public org.springframework.amqp.core.Message receive(long) throws org.springframework.amqp.AmqpException;
+  public org.springframework.amqp.core.Message receive(java.lang.String, long);
+  public java.lang.Object receiveAndConvert() throws org.springframework.amqp.AmqpException;
+  public java.lang.Object receiveAndConvert(java.lang.String) throws org.springframework.amqp.AmqpException;
+  public java.lang.Object receiveAndConvert(long) throws org.springframework.amqp.AmqpException;
+  public java.lang.Object receiveAndConvert(java.lang.String, long) throws org.springframework.amqp.AmqpException;
+  public <T> T receiveAndConvert(org.springframework.core.ParameterizedTypeReference<T>) throws org.springframework.amqp.AmqpException;
+  public <T> T receiveAndConvert(java.lang.String, org.springframework.core.ParameterizedTypeReference<T>) throws org.springframework.amqp.AmqpException;
+  public <T> T receiveAndConvert(long, org.springframework.core.ParameterizedTypeReference<T>) throws org.springframework.amqp.AmqpException;
+  public <T> T receiveAndConvert(java.lang.String, long, org.springframework.core.ParameterizedTypeReference<T>) throws org.springframework.amqp.AmqpException;
+  public <R, S> boolean receiveAndReply(org.springframework.amqp.core.ReceiveAndReplyCallback<R, S>) throws org.springframework.amqp.AmqpException;
+  public <R, S> boolean receiveAndReply(java.lang.String, org.springframework.amqp.core.ReceiveAndReplyCallback<R, S>) throws org.springframework.amqp.AmqpException;
+  public <R, S> boolean receiveAndReply(org.springframework.amqp.core.ReceiveAndReplyCallback<R, S>, java.lang.String, java.lang.String) throws org.springframework.amqp.AmqpException;
+  public <R, S> boolean receiveAndReply(java.lang.String, org.springframework.amqp.core.ReceiveAndReplyCallback<R, S>, java.lang.String, java.lang.String) throws org.springframework.amqp.AmqpException;
+  public <R, S> boolean receiveAndReply(org.springframework.amqp.core.ReceiveAndReplyCallback<R, S>, org.springframework.amqp.core.ReplyToAddressCallback<S>) throws org.springframework.amqp.AmqpException;
+  public <R, S> boolean receiveAndReply(java.lang.String, org.springframework.amqp.core.ReceiveAndReplyCallback<R, S>, org.springframework.amqp.core.ReplyToAddressCallback<S>) throws org.springframework.amqp.AmqpException;
+---
+  public org.springframework.amqp.rabbit.core.RabbitAdmin(org.springframework.amqp.rabbit.connection.ConnectionFactory);
+  public org.springframework.amqp.rabbit.core.RabbitAdmin(org.springframework.amqp.rabbit.core.RabbitTemplate);
+  public void declareExchange(org.springframework.amqp.core.Exchange);
+  public java.lang.String declareQueue(org.springframework.amqp.core.Queue);
+  public org.springframework.amqp.core.Queue declareQueue();
+  public void declareBinding(org.springframework.amqp.core.Binding);
+  public boolean isRedeclareManualDeclarations();
+  public void setRedeclareManualDeclarations(boolean);
+Bash
+IN
+jar=$(find ~/.m2 -iname "spring-rabbit-4.0.4.jar" | head -1)
+javap -public -cp "$jar" org.springframework.amqp.rabbit.connection.CachingConnectionFactory 2>&1 | grep -E "public.*CachingConnectionFactory\(|setHost|setPort|setUsername|setPassword"
+echo ---testcontainers---
+jar2=$(find ~/.m2 -iname "testcontainers-rabbitmq-2.0.5.jar" | head -1)
+echo $jar2
+javap -public -cp "$jar2" org.testcontainers.rabbitmq.RabbitMQContainer 2>&1 | grep -E "public.*RabbitMQContainer\(|getAmqpPort|getHost|withUser|Admin"
+
+OUT
+  public org.springframework.amqp.rabbit.connection.CachingConnectionFactory();
+  public org.springframework.amqp.rabbit.connection.CachingConnectionFactory(java.lang.String);
+  public org.springframework.amqp.rabbit.connection.CachingConnectionFactory(int);
+  public org.springframework.amqp.rabbit.connection.CachingConnectionFactory(java.lang.String, int);
+  public org.springframework.amqp.rabbit.connection.CachingConnectionFactory(java.net.URI);
+  public org.springframework.amqp.rabbit.connection.CachingConnectionFactory(com.rabbitmq.client.ConnectionFactory);
+---testcontainers---
+/home/juanjo/.m2/repository/org/testcontainers/testcontainers-rabbitmq/2.0.5/testcontainers-rabbitmq-2.0.5.jar
+  public org.testcontainers.rabbitmq.RabbitMQContainer(java.lang.String);
+  public org.testcontainers.rabbitmq.RabbitMQContainer(org.testcontainers.utility.DockerImageName);
+  public java.lang.String getAdminPassword();
+  public java.lang.String getAdminUsername();
+  public java.lang.Integer getAmqpPort();
+  public org.testcontainers.rabbitmq.RabbitMQContainer withAdminUser(java.lang.String);
+  public org.testcontainers.rabbitmq.RabbitMQContainer withAdminPassword(java.lang.String);
+Bash
+IN
+jar=$(find ~/.m2 -iname "spring-rabbit-4.0.4.jar" | head -1)
+javap -public -cp "$jar" org.springframework.amqp.rabbit.connection.AbstractConnectionFactory 2>&1 | grep -iE "setUsername|setPassword|setHost|setPort"
+
+OUT
+  public void setUsername(java.lang.String);
+  public void setPassword(java.lang.String);
+  public void setHost(java.lang.String);
+  public void setPort(int);
+Read PromotionTest.java
+Now I have enough to implement. Let me start with the domain layer changes.
+
+Edit DomainEvent.java
+Added 1 line
+Edit DomainEvent.java
+Added 12 lines
+Now the Promotion aggregate — adding event recording to every transition:
+
+Edit Promotion.java
+Added 2 lines
+Now let's add event type constants, the pending events field, and wire recording into each transition method.
+
+Edit Promotion.java
+Added 14 lines
+Now update request() to record the event, and add the recordEvent/pullDomainEvents methods plus event recording in each transition:
+
+Edit Promotion.java
+Added 10 lines
+Edit Promotion.java
+Added 27 lines
+Now the EventPublisherPort domain port:
+
+Write EventPublisherPort.java
+17 lines
+package com.releasepilot.domain.ports;
+
+import com.releasepilot.domain.promotion.DomainEvent;
+
+/**
+ * Output port: the capability the application layer requires to reliably hand off a
+ * {@link DomainEvent} recorded by the {@code Promotion} aggregate for eventual delivery to the
+ * message queue. A call returning normally is a durability guarantee, not a delivery one — the
+ * transactional-outbox adapter (SPECS §5.1) persists the event in the same DB transaction as the
+ * aggregate's new state; a separate relay delivers it to the broker afterwards, decoupled from the
+ * command-handling call stack.
+ */
+public interface EventPublisherPort {
+
+	void publish(DomainEvent event);
+}
+Now update PromotionCommandService to use the port after every command:
+
+Write PromotionCommandService.java
+118 lines
+package com.releasepilot.application.commands;
+
+import com.releasepilot.domain.ports.DeploymentPort;
+import com.releasepilot.domain.ports.DeploymentRef;
+import com.releasepilot.domain.ports.EventPublisherPort;
+import com.releasepilot.domain.ports.PromotionRepositoryPort;
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.DomainEvent;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.Promotion;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Version;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Implementation of the {@link PromotionCommandPort} — the only port implemented in this layer.
+ * Loads the sibling promotions each invariant needs (§3.4) through {@link PromotionRepositoryPort},
+ * then lets the {@link Promotion} aggregate itself decide and guard every transition.
+ *
+ * <p>After every command persists the aggregate's new state, the handler pulls the event(s) that
+ * transition recorded on the aggregate and publishes them through {@link EventPublisherPort}
+ * (SPECS §5.1) — the state write and the publish call happen back-to-back in the same handler
+ * invocation so the outbox adapter backing the port can enlist both in one DB transaction.
+ */
+public class PromotionCommandService implements PromotionCommandPort {
+
+	private final DeploymentPort deploymentPort;
+	private final PromotionRepositoryPort repository;
+	private final EventPublisherPort eventPublisher;
+
+	public PromotionCommandService(
+			DeploymentPort deploymentPort, PromotionRepositoryPort repository, EventPublisherPort eventPublisher) {
+		this.deploymentPort = deploymentPort;
+		this.repository = repository;
+		this.eventPublisher = eventPublisher;
+	}
+
+	@Override
+	public PromotionId requestPromotion(
+			ApplicationId applicationId, Version version, Environment targetEnvironment, Actor requestedBy) {
+		Environment lastCompleted = repository.findLastCompletedEnvironment(applicationId, version).orElse(null);
+		List<Promotion> existingForTarget =
+				repository.findActivePromotionsForTarget(applicationId, targetEnvironment);
+		Promotion promotion = Promotion.request(
+				PromotionId.random(), applicationId, version, lastCompleted, targetEnvironment, requestedBy,
+				existingForTarget);
+		repository.save(promotion);
+		publishEvents(promotion);
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId approvePromotion(PromotionId promotionId, Actor approvedBy) {
+		Promotion promotion = load(promotionId);
+		promotion.approve(approvedBy);
+		repository.save(promotion);
+		publishEvents(promotion);
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId startDeployment(PromotionId promotionId, Actor startedBy) {
+		Promotion promotion = load(promotionId);
+		promotion.startDeployment(startedBy);
+		DeploymentRef deploymentRef =
+				deploymentPort.trigger(promotion.applicationId(), promotion.version(), promotion.targetEnvironment());
+		repository.save(promotion);
+		publishEvents(promotion, Map.of("deploymentRef", deploymentRef.value()));
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId completePromotion(PromotionId promotionId, Actor completedBy) {
+		Promotion promotion = load(promotionId);
+		promotion.complete(completedBy);
+		repository.save(promotion);
+		publishEvents(promotion);
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId rollbackPromotion(PromotionId promotionId, Actor rolledBackBy) {
+		Promotion promotion = load(promotionId);
+		promotion.rollback(rolledBackBy);
+		repository.save(promotion);
+		publishEvents(promotion);
+		return promotion.id();
+	}
+
+	@Override
+	public PromotionId cancelPromotion(PromotionId promotionId, Actor cancelledBy) {
+		Promotion promotion = load(promotionId);
+		promotion.cancel(cancelledBy);
+		repository.save(promotion);
+		publishEvents(promotion);
+		return promotion.id();
+	}
+
+	private Promotion load(PromotionId promotionId) {
+		return repository.findById(promotionId)
+				.orElseThrow(() -> new PromotionNotFoundException(promotionId));
+	}
+
+	private void publishEvents(Promotion promotion) {
+		promotion.pullDomainEvents().forEach(eventPublisher::publish);
+	}
+
+	/** Enriches every event pulled from this transition with {@code extraPayload} before publishing. */
+	private void publishEvents(Promotion promotion, Map<String, Object> extraPayload) {
+		for (DomainEvent event : promotion.pullDomainEvents()) {
+			eventPublisher.publish(event.withPayload(extraPayload));
+		}
+	}
+}
+That's a stale IDE index — the file exists. I'll confirm with a real compile shortly. Now let's update the unit tests.
+
+Edit PromotionCommandServiceTest.java
+Added 2 lines
+Edit PromotionCommandServiceTest.java
+Added 3 lines
+Now let's add the event-publishing tests and the publishedEvent() helper:
+
+Edit PromotionCommandServiceTest.java
+Added 89 lines
+Now let's add domain-level tests for pullDomainEvents on the Promotion aggregate itself:
+
+Edit PromotionTest.java
+Added 77 lines
+Now let's compile and run the unit tests to catch errors early, before building out the infrastructure layer.
+
+Bash
+IN
+timeout 120 ./mvnw -q test 2>&1 | tail -150
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+[ERROR] Tests run: 13, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 0.561 s <<< FAILURE! -- in com.releasepilot.application.commands.PromotionCommandServiceTest
+[ERROR] com.releasepilot.application.commands.PromotionCommandServiceTest.completingAPromotionUnlocksTheNextEnvironmentForTheSameVersion -- Time elapsed: 0.008 s <<< ERROR!
+java.lang.NullPointerException: Cannot invoke "com.releasepilot.domain.ports.DeploymentRef.value()" because "deploymentRef" is null
+	at com.releasepilot.application.commands.PromotionCommandService.startDeployment(PromotionCommandService.java:71)
+	at com.releasepilot.application.commands.PromotionCommandServiceTest.completingAPromotionUnlocksTheNextEnvironmentForTheSameVersion(PromotionCommandServiceTest.java:113)
+
+18:49:34.139 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+18:49:34.181 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+18:49:34.211 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+18:49:34.213 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T18:49:34.357+02:00  INFO 149817 --- [           main] c.r.ReleasePilotApplicationTests         : Starting ReleasePilotApplicationTests using Java 21.0.11 with PID 149817 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T18:49:34.358+02:00  INFO 149817 --- [           main] c.r.ReleasePilotApplicationTests         : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T18:49:34.873+02:00  INFO 149817 --- [           main] c.r.ReleasePilotApplicationTests         : Started ReleasePilotApplicationTests in 0.64 seconds (process running for 1.683)
+[ERROR] Errors: 
+[ERROR]   PromotionCommandServiceTest.completingAPromotionUnlocksTheNextEnvironmentForTheSameVersion:113 » NullPointer Cannot invoke "com.releasepilot.domain.ports.DeploymentRef.value()" because "deploymentRef" is null
+[ERROR] Tests run: 40, Failures: 0, Errors: 1, Skipped: 0
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.6:test (default-test) on project releasepilot: 
+[ERROR] 
+[ERROR] See /home/juanjo/git/agile-monkeys-test/target/surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+Read PromotionCommandServiceTest.java (lines 101-120)
+Edit PromotionCommandServiceTest.java
+Added 1 line
+Bash
+IN
+timeout 120 ./mvnw -q test 2>&1 | tail -100
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+18:49:57.134 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+18:49:57.180 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+18:49:57.227 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+18:49:57.229 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T18:49:57.386+02:00  INFO 150232 --- [           main] c.r.ReleasePilotApplicationTests         : Starting ReleasePilotApplicationTests using Java 21.0.11 with PID 150232 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T18:49:57.387+02:00  INFO 150232 --- [           main] c.r.ReleasePilotApplicationTests         : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T18:49:57.987+02:00  INFO 150232 --- [           main] c.r.ReleasePilotApplicationTests         : Started ReleasePilotApplicationTests in 0.729 seconds (process running for 1.799)
+All unit tests pass. Now let's build the infrastructure layer: the outbox table migration, the outbox-writing adapter, and the relay to RabbitMQ.
+
+Write V2__create_outbox_events_table.sql
+14 lines
+CREATE TABLE outbox_events (
+    id               UUID PRIMARY KEY,
+    event_type       VARCHAR(50) NOT NULL,
+    promotion_id     UUID NOT NULL,
+    application_id   UUID NOT NULL,
+    acting_user      VARCHAR(255) NOT NULL,
+    occurred_at      TIMESTAMPTZ NOT NULL,
+    payload          JSONB NOT NULL,
+    published_at     TIMESTAMPTZ
+);
+
+-- Scopes OutboxRelay's poll for events not yet delivered to the broker.
+CREATE INDEX idx_outbox_events_unpublished ON outbox_events (occurred_at) WHERE published_at IS NULL;
+Write OutboxEventPublisher.java
+46 lines
+package com.releasepilot.infrastructure.persistence;
+
+import com.releasepilot.domain.ports.EventPublisherPort;
+import com.releasepilot.domain.promotion.DomainEvent;
+import org.springframework.jdbc.core.JdbcTemplate;
+import tools.jackson.databind.ObjectMapper;
+
+import java.sql.Timestamp;
+
+/**
+ * JDBC implementation of {@link EventPublisherPort} — the write side of the transactional-outbox
+ * pattern (SPECS §5.1). Inserts one row per event into the {@code outbox_events} table
+ * (see {@code db/migration/V2__create_outbox_events_table.sql}) via plain {@link JdbcTemplate},
+ * using the same connection/transaction the command handler's {@code PromotionRepositoryPort.save}
+ * call runs in, so the aggregate's new state and its event are committed together or not at all.
+ * {@link com.releasepilot.infrastructure.queue.OutboxRelay} is the separate, decoupled component
+ * that later reads unsent rows here and delivers them to the message broker.
+ */
+public class OutboxEventPublisher implements EventPublisherPort {
+
+	private final JdbcTemplate jdbcTemplate;
+	private final ObjectMapper objectMapper;
+
+	public OutboxEventPublisher(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+		this.jdbcTemplate = jdbcTemplate;
+		this.objectMapper = objectMapper;
+	}
+
+	@Override
+	public void publish(DomainEvent event) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO outbox_events (
+				    id, event_type, promotion_id, application_id, acting_user, occurred_at, payload
+				) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)
+				""",
+				event.eventId(),
+				event.eventType(),
+				event.promotionId().value(),
+				event.applicationId().value(),
+				event.actingUser(),
+				Timestamp.from(event.occurredAt()),
+				objectMapper.writeValueAsString(event.payload()));
+	}
+}
+Write OutboxRelay.java
+108 lines
+package com.releasepilot.infrastructure.queue;
+
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageBuilder;
+import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+
+import java.nio.charset.StandardCharsets;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Reads rows the {@link com.releasepilot.infrastructure.persistence.OutboxEventPublisher} wrote to
+ * {@code outbox_events} that have not yet been delivered, publishes each to the
+ * {@value #PROMOTION_EVENTS_EXCHANGE} fanout exchange, and marks it as sent. This is the second
+ * half of the transactional-outbox pattern (SPECS §5.1): it runs decoupled from the command-
+ * handling call stack (its own poll loop/process in production), so a broker hiccup can never make
+ * an API call fail or block.
+ *
+ * <p>The fanout exchange means every consumer declares and binds its own queue to it — this relay
+ * does not need to know how many consumers exist or what they're called.
+ */
+public class OutboxRelay {
+
+	public static final String PROMOTION_EVENTS_EXCHANGE = "promotion.events";
+
+	private static final RowMapper<OutboxRow> ROW_MAPPER = OutboxRelay::mapRow;
+
+	private final JdbcTemplate jdbcTemplate;
+	private final RabbitTemplate rabbitTemplate;
+	private final ObjectMapper objectMapper;
+
+	public OutboxRelay(JdbcTemplate jdbcTemplate, RabbitTemplate rabbitTemplate, ObjectMapper objectMapper) {
+		this.jdbcTemplate = jdbcTemplate;
+		this.rabbitTemplate = rabbitTemplate;
+		this.objectMapper = objectMapper;
+	}
+
+	/**
+	 * Publishes every outbox row not yet sent, oldest first, marking each as sent immediately after
+	 * the broker accepts it. Returns how many rows were relayed.
+	 */
+	public int relayPendingEvents() {
+		List<OutboxRow> pending = jdbcTemplate.query(
+				"""
+				SELECT id, event_type, promotion_id, application_id, acting_user, occurred_at, payload
+				FROM outbox_events
+				WHERE published_at IS NULL
+				ORDER BY occurred_at
+				""",
+				ROW_MAPPER);
+
+		for (OutboxRow row : pending) {
+			rabbitTemplate.send(PROMOTION_EVENTS_EXCHANGE, "", toMessage(row));
+			jdbcTemplate.update("UPDATE outbox_events SET published_at = now() WHERE id = ?", row.id());
+		}
+
+		return pending.size();
+	}
+
+	private Message toMessage(OutboxRow row) {
+		Map<String, Object> payload = objectMapper.readValue(row.payloadJson(), new TypeReference<Map<String, Object>>() {
+		});
+
+		Map<String, Object> envelope = new LinkedHashMap<>();
+		envelope.put("eventId", row.id().toString());
+		envelope.put("eventType", row.eventType());
+		envelope.put("occurredAt", row.occurredAt().toString());
+		envelope.put("promotionId", row.promotionId().toString());
+		envelope.put("applicationId", row.applicationId().toString());
+		envelope.put("actingUser", row.actingUser());
+		envelope.put("payload", payload);
+
+		byte[] body = objectMapper.writeValueAsString(envelope).getBytes(StandardCharsets.UTF_8);
+		return MessageBuilder.withBody(body).setContentType(MessageProperties.CONTENT_TYPE_JSON).build();
+	}
+
+	private static OutboxRow mapRow(ResultSet rs, int rowNum) throws SQLException {
+		return new OutboxRow(
+				rs.getObject("id", UUID.class),
+				rs.getString("event_type"),
+				rs.getObject("promotion_id", UUID.class),
+				rs.getObject("application_id", UUID.class),
+				rs.getString("acting_user"),
+				rs.getTimestamp("occurred_at").toInstant(),
+				rs.getString("payload"));
+	}
+
+	private record OutboxRow(
+			UUID id,
+			String eventType,
+			UUID promotionId,
+			UUID applicationId,
+			String actingUser,
+			Instant occurredAt,
+			String payloadJson) {
+	}
+}
+Now let's compile to catch issues before writing integration tests.
+
+Bash
+IN
+timeout 90 ./mvnw -q compile 2>&1 | tail -150
+
+OUT
+(Bash completed with no output)
+Bash
+IN
+cat /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/PromotionId.java /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/ApplicationId.java /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/Version.java
+
+OUT
+package com.releasepilot.domain.promotion;
+
+import java.util.Objects;
+import java.util.UUID;
+
+public record PromotionId(UUID value) {
+
+	public PromotionId {
+		Objects.requireNonNull(value, "PromotionId value must not be null");
+	}
+
+	public static PromotionId of(String value) {
+		return new PromotionId(UUID.fromString(value));
+	}
+
+	public static PromotionId random() {
+		return new PromotionId(UUID.randomUUID());
+	}
+}
+package com.releasepilot.domain.promotion;
+
+import java.util.Objects;
+import java.util.UUID;
+
+public record ApplicationId(UUID value) {
+
+	public ApplicationId {
+		Objects.requireNonNull(value, "ApplicationId value must not be null");
+	}
+
+	public static ApplicationId of(String value) {
+		return new ApplicationId(UUID.fromString(value));
+	}
+
+	public static ApplicationId random() {
+		return new ApplicationId(UUID.randomUUID());
+	}
+}
+package com.releasepilot.domain.promotion;
+
+/**
+ * An opaque, immutable build/artifact identifier for an application (e.g. semver or commit SHA).
+ */
+public record Version(String value) {
+
+	public Version {
+		if (value == null || value.isBlank()) {
+			throw new IllegalArgumentException("Version value must not be blank");
+		}
+	}
+}
+Now let's write the OutboxEventPublisherIT test.
+
+Write OutboxEventPublisherIT.java
+91 lines
+package com.releasepilot.infrastructure.persistence;
+
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.DomainEvent;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Role;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.ObjectMapper;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Exercises {@link OutboxEventPublisher} against a real PostgreSQL instance (via Testcontainers):
+ * proves a published {@link DomainEvent} lands in {@code outbox_events} verbatim, with its payload
+ * stored as real {@code jsonb} (round-trippable, not just an opaque string) and {@code published_at}
+ * left {@code NULL} until {@link com.releasepilot.infrastructure.queue.OutboxRelay} delivers it.
+ *
+ * <p>Named {@code *IT} — see {@code JdbcPromotionRepositoryIT} for why only {@code mvnw verify} runs it.
+ */
+@Testcontainers
+class OutboxEventPublisherIT {
+
+	@Container
+	static final PostgreSQLContainer POSTGRES =
+			new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
+
+	private static HikariDataSource dataSource;
+	private static JdbcTemplate jdbcTemplate;
+	private static OutboxEventPublisher publisher;
+
+	private final ApplicationId applicationId = ApplicationId.random();
+	private final PromotionId promotionId = PromotionId.random();
+	private final Actor requester = new Actor("alice", Role.REQUESTER);
+
+	@BeforeAll
+	static void migrateSchemaAndConnect() {
+		HikariConfig config = new HikariConfig();
+		config.setJdbcUrl(POSTGRES.getJdbcUrl());
+		config.setUsername(POSTGRES.getUsername());
+		config.setPassword(POSTGRES.getPassword());
+		dataSource = new HikariDataSource(config);
+
+		Flyway.configure().dataSource(dataSource).load().migrate();
+
+		jdbcTemplate = new JdbcTemplate(dataSource);
+		publisher = new OutboxEventPublisher(jdbcTemplate, new ObjectMapper());
+	}
+
+	@AfterAll
+	static void closeDataSource() {
+		dataSource.close();
+	}
+
+	@Test
+	void publishingAnEventInsertsAnUnpublishedOutboxRowWithTheFullPayload() {
+		DomainEvent event = DomainEvent.of(
+				"PromotionRequested",
+				promotionId,
+				applicationId,
+				requester,
+				Map.of("version", "1.4.0", "targetEnvironment", "DEV"));
+
+		publisher.publish(event);
+
+		Map<String, Object> row = jdbcTemplate.queryForMap(
+				"SELECT event_type, promotion_id, application_id, acting_user, published_at, payload::text AS payload_text "
+						+ "FROM outbox_events WHERE id = ?",
+				event.eventId());
+
+		assertThat(row.get("event_type")).isEqualTo("PromotionRequested");
+		assertThat(row.get("promotion_id")).isEqualTo(promotionId.value());
+		assertThat(row.get("application_id")).isEqualTo(applicationId.value());
+		assertThat(row.get("acting_user")).isEqualTo("alice");
+		assertThat(row.get("published_at")).isNull();
+		assertThat((String) row.get("payload_text")).contains("\"version\"", "1.4.0", "targetEnvironment", "DEV");
+	}
+}
+Write OutboxRelayIT.java
+137 lines
+package com.releasepilot.infrastructure.queue;
+
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.DomainEvent;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Role;
+import com.releasepilot.infrastructure.persistence.OutboxEventPublisher;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.FanoutExchange;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.rabbitmq.RabbitMQContainer;
+import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.ObjectMapper;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Exercises {@link OutboxRelay} against real PostgreSQL and RabbitMQ instances (via Testcontainers):
+ * proves an event written to the outbox by {@link OutboxEventPublisher} is delivered to the
+ * {@value OutboxRelay#PROMOTION_EVENTS_EXCHANGE} fanout exchange, that {@code published_at} gets
+ * set once delivered, and that a second relay pass does not redeliver it — the whole outbox →
+ * queue path (SPECS §5.1) working end to end, not just each half in isolation.
+ *
+ * <p>Named {@code *IT} — see {@code JdbcPromotionRepositoryIT} for why only {@code mvnw verify} runs it.
+ */
+@Testcontainers
+class OutboxRelayIT {
+
+	@Container
+	static final PostgreSQLContainer POSTGRES =
+			new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
+
+	@Container
+	static final RabbitMQContainer RABBITMQ =
+			new RabbitMQContainer(DockerImageName.parse("rabbitmq:3-management-alpine"));
+
+	private static HikariDataSource dataSource;
+	private static JdbcTemplate jdbcTemplate;
+	private static OutboxEventPublisher publisher;
+	private static CachingConnectionFactory connectionFactory;
+	private static RabbitTemplate rabbitTemplate;
+	private static OutboxRelay relay;
+	private static Queue testQueue;
+
+	private final ApplicationId applicationId = ApplicationId.random();
+	private final PromotionId promotionId = PromotionId.random();
+	private final Actor approver = new Actor("bob", Role.APPROVER);
+
+	@BeforeAll
+	static void setUpInfrastructure() {
+		HikariConfig config = new HikariConfig();
+		config.setJdbcUrl(POSTGRES.getJdbcUrl());
+		config.setUsername(POSTGRES.getUsername());
+		config.setPassword(POSTGRES.getPassword());
+		dataSource = new HikariDataSource(config);
+		Flyway.configure().dataSource(dataSource).load().migrate();
+		jdbcTemplate = new JdbcTemplate(dataSource);
+
+		ObjectMapper objectMapper = new ObjectMapper();
+		publisher = new OutboxEventPublisher(jdbcTemplate, objectMapper);
+
+		connectionFactory = new CachingConnectionFactory();
+		connectionFactory.setHost(RABBITMQ.getHost());
+		connectionFactory.setPort(RABBITMQ.getAmqpPort());
+		connectionFactory.setUsername(RABBITMQ.getAdminUsername());
+		connectionFactory.setPassword(RABBITMQ.getAdminPassword());
+
+		rabbitTemplate = new RabbitTemplate(connectionFactory);
+		relay = new OutboxRelay(jdbcTemplate, rabbitTemplate, objectMapper);
+
+		RabbitAdmin admin = new RabbitAdmin(connectionFactory);
+		FanoutExchange exchange = new FanoutExchange(OutboxRelay.PROMOTION_EVENTS_EXCHANGE);
+		admin.declareExchange(exchange);
+		testQueue = new Queue("test.promotion-events." + UUID.randomUUID(), false, false, true);
+		admin.declareQueue(testQueue);
+		Binding binding = BindingBuilder.bind(testQueue).to(exchange);
+		admin.declareBinding(binding);
+	}
+
+	@AfterAll
+	static void tearDown() {
+		connectionFactory.destroy();
+		dataSource.close();
+	}
+
+	@Test
+	void relayingPendingEventsDeliversThemToTheFanoutExchangeAndMarksThemSent() {
+		DomainEvent event = DomainEvent.of(
+				"PromotionApproved", promotionId, applicationId, approver, Map.of("approvedBy", "bob"));
+		publisher.publish(event);
+
+		int relayed = relay.relayPendingEvents();
+
+		assertThat(relayed).isEqualTo(1);
+
+		Message received = rabbitTemplate.receive(testQueue.getName(), 5000);
+		assertThat(received).isNotNull();
+		String body = new String(received.getBody(), StandardCharsets.UTF_8);
+		assertThat(body)
+				.contains("\"eventType\":\"PromotionApproved\"")
+				.contains(promotionId.value().toString())
+				.contains("\"approvedBy\":\"bob\"");
+
+		Boolean stillUnpublished = jdbcTemplate.queryForObject(
+				"SELECT published_at IS NULL FROM outbox_events WHERE id = ?", Boolean.class, event.eventId());
+		assertThat(stillUnpublished).isFalse();
+	}
+
+	@Test
+	void relayingAgainWithNothingPendingDeliversNothing() {
+		int relayed = relay.relayPendingEvents();
+
+		assertThat(relayed).isZero();
+		assertThat(rabbitTemplate.receive(testQueue.getName(), 500)).isNull();
+	}
+}
+Bash
+IN
+timeout 90 ./mvnw -q test-compile 2>&1 | tail -150
+
+OUT
+(Bash completed with no output)
+Compiles cleanly. Let's check whether Docker is available to actually run the integration tests.
+
+Bash
+IN
+docker info >/dev/null 2>&1 && echo "docker available" || echo "docker NOT available"
+
+OUT
+docker NOT available
+Bash
+IN
+jar=$(find ~/.m2 -iname "testcontainers-rabbitmq-2.0.5.jar" | head -1)
+mkdir -p /tmp/rmqinspect && cd /tmp/rmqinspect && unzip -o -q "$jar" -d extracted
+find extracted -name "RabbitMQContainer.class"
+javap -p -c -cp extracted org.testcontainers.rabbitmq.RabbitMQContainer 2>&1 | grep -A5 "getAmqpPort"
+
+OUT
+extracted/org/testcontainers/containers/RabbitMQContainer.class
+extracted/org/testcontainers/rabbitmq/RabbitMQContainer.class
+  public java.lang.Integer getAmqpPort();
+    Code:
+       0: aload_0
+       1: sipush        5672
+       4: invokevirtual #130                // Method getMappedPort:(I)Ljava/lang/Integer;
+       7: areturn
+--
+      25: invokevirtual #150                // Method getAmqpPort:()Ljava/lang/Integer;
+      28: invokevirtual #153                // Method java/lang/StringBuilder.append:(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+      31: invokevirtual #156                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      34: areturn
+
+  public java.lang.String getAmqpsUrl();
+Shell cwd was reset to /home/juanjo/git/agile-monkeys-test
+Bash
+IN
+jar=$(find ~/.m2 -iname "spring-amqp-4.0.4.jar" | head -1)
+javap -public -cp "$jar" org.springframework.amqp.core.Queue 2>&1 | grep "Queue("
+echo ---
+javap -public -cp "$jar" org.springframework.amqp.core.FanoutExchange 2>&1 | grep "FanoutExchange("
+echo ---
+javap -public -cp "$jar" org.springframework.amqp.core.BindingBuilder 2>&1 | grep -E "bind|to\("
+
+OUT
+  public org.springframework.amqp.core.Queue(java.lang.String);
+  public org.springframework.amqp.core.Queue(java.lang.String, boolean);
+  public org.springframework.amqp.core.Queue(java.lang.String, boolean, boolean, boolean);
+  public org.springframework.amqp.core.Queue(java.lang.String, boolean, boolean, boolean, java.util.Map<java.lang.String, java.lang.Object>);
+---
+  public org.springframework.amqp.core.FanoutExchange(java.lang.String);
+  public org.springframework.amqp.core.FanoutExchange(java.lang.String, boolean, boolean);
+  public org.springframework.amqp.core.FanoutExchange(java.lang.String, boolean, boolean, java.util.Map<java.lang.String, java.lang.Object>);
+---
+  public static org.springframework.amqp.core.BindingBuilder$DestinationConfigurer bind(org.springframework.amqp.core.Queue);
+  public static org.springframework.amqp.core.BindingBuilder$DestinationConfigurer bind(org.springframework.amqp.core.Exchange);
+Bash
+IN
+jar=$(find ~/.m2 -iname "spring-amqp-4.0.4.jar" | head -1)
+javap -public -cp "$jar" 'org.springframework.amqp.core.BindingBuilder$DestinationConfigurer' 2>&1
+
+OUT
+Compiled from "BindingBuilder.java"
+public final class org.springframework.amqp.core.BindingBuilder$DestinationConfigurer {
+  public org.springframework.amqp.core.Binding to(org.springframework.amqp.core.FanoutExchange);
+  public org.springframework.amqp.core.BindingBuilder$HeadersExchangeMapConfigurer to(org.springframework.amqp.core.HeadersExchange);
+  public org.springframework.amqp.core.BindingBuilder$DirectExchangeRoutingKeyConfigurer to(org.springframework.amqp.core.DirectExchange);
+  public org.springframework.amqp.core.BindingBuilder$TopicExchangeRoutingKeyConfigurer to(org.springframework.amqp.core.TopicExchange);
+  public org.springframework.amqp.core.BindingBuilder$GenericExchangeRoutingKeyConfigurer to(org.springframework.amqp.core.Exchange);
+}
+Confirmed — .to(FanoutExchange) returns Binding directly, matching what I wrote. All the AMQP API usage checks out. Let's also verify RabbitAdmin.declareQueue(Queue) returns the queue name (used it correctly, ignoring return value) and double check my code compiles against these exact signatures once more with a full clean build.
+
+Bash
+IN
+timeout 90 ./mvnw -q clean test-compile 2>&1 | tail -150
+
+OUT
+(Bash completed with no output)
+Clean build compiles without errors. Now let's run the unit test suite once more against the fresh build to be sure nothing regressed.
+
+Bash
+IN
+timeout 120 ./mvnw -q test 2>&1 | grep -E "Tests run|ERROR|FAIL" | tail -40
+
+OUT
+(Bash completed with no output)
+Bash
+IN
+timeout 120 ./mvnw test 2>&1 | grep -E "Tests run|BUILD"
+
+OUT
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.501 s -- in com.releasepilot.application.commands.PromotionCommandServiceTest
+[INFO] Tests run: 26, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.029 s -- in com.releasepilot.domain.promotion.PromotionTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.927 s -- in com.releasepilot.ReleasePilotApplicationTests
+[INFO] Tests run: 40, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+Bash
+IN
+wc -l /home/juanjo/git/agile-monkeys-test/README.md; tail -60 /home/juanjo/git/agile-monkeys-test/README.md
+
+OUT
+182 /home/juanjo/git/agile-monkeys-test/README.md
+    │                      │                    └──rollback──▶ RolledBack
+    │                      │
+    └──────cancel──────────┴──────cancel────────▶ Cancelled
+```
+
+| State | Reached via | Guards enforced on entry |
+|---|---|---|
+| `Requested` | `Promotion.request(...)` | target environment is the immediate next step after the version's last completed environment (no skipping); no other non-terminal promotion already targets the same `(application, environment)` pair |
+| `Approved` | `approve(actor)` | promotion is not terminal and is currently `Requested`; `actor` holds the `approver` role |
+| `InProgress` | `startDeployment(actor)` | promotion is not terminal and is currently `Approved` |
+| `Completed` *(terminal)* | `complete(actor)` | promotion is not terminal and is currently `InProgress` |
+| `RolledBack` *(terminal)* | `rollback(actor)` | promotion is not terminal and is currently `InProgress` |
+| `Cancelled` *(terminal)* | `cancel(actor)` | promotion is not terminal and is currently `Requested` or `Approved` |
+
+Once a promotion reaches a terminal state (`Completed`, `RolledBack`,
+`Cancelled`) every subsequent command is rejected with
+`PromotionAlreadyTerminalError` — no field on a terminal promotion can change.
+Any other out-of-order command (e.g. approving a promotion that is already
+`Approved`) is rejected with `InvalidTransitionError`. Both are domain errors
+(`domain/promotion/errors/`), never uncaught exceptions.
+
+Checking the "no skipping" and "no duplicate in-flight promotion" invariants
+requires knowledge of sibling `Promotion` instances for the same application,
+so the application layer (`PromotionCommandService`, the implementation of
+the `PromotionCommandPort` input port) fetches that sibling data and passes
+it into `Promotion.request(...)` — but the aggregate itself still makes the
+decision and throws the domain error if a rule is violated.
+
+`DeploymentPort`, `IssueTrackerPort`, and `NotificationPort`
+(`domain/ports/`) are the domain's output ports: capabilities it requires of
+the outside world, defined here as plain interfaces with no implementation
+yet — infrastructure adapters (in-memory stubs, later real clients) are a
+separate concern layered on top.
+
+`PromotionRepositoryPort` (`domain/ports/`), the write-side persistence output
+port, is implemented by `JdbcPromotionRepository`
+(`infrastructure/persistence/`) — plain `JdbcTemplate` mapping rows to/from
+`Promotion` explicitly, deliberately not Spring Data JPA/JDBC, so the
+aggregate's own constructors stay in control of its invariants rather than a
+framework reconstructing it via reflection (see SPECS.md §11). The schema
+lives in `db/migration/V1__create_promotions_table.sql`, applied by Flyway.
+It is not yet wired into the Spring context — nothing in the application
+depends on a live `DataSource` until the HTTP layer is connected to the
+command handlers, so `ReleasePilotApplication` excludes
+`DataSourceAutoConfiguration` for now and the adapter is exercised directly
+by `JdbcPromotionRepositoryIT` (see "Persistence integration tests" above).
+
+## Project structure
+
+```
+src/main/java/com/releasepilot/
+  domain/          # Promotion aggregate, value objects, invariants, ports
+  application/      # Command and query handlers
+  infrastructure/    # Persistence, in-memory adapters, message queue
+  consumers/         # Async event consumers (audit log, projections, notifications)
+  api/                # Thin REST controllers
+src/main/resources/
+  db/migration/       # Flyway SQL migrations
+  application.yml
+```
+Edit README.md
+Added 42 lines
+Those are just spell-checker false positives on proper nouns (Testcontainers, AMQP, fanout, etc.) — no fix needed. Now let's also update the project structure tree to mention the outbox/queue pieces more concretely.
+
+Read README.md (lines 211-225)
+That's already generic enough to cover this addition — no change needed there. Now let's double check the docker-compose already correctly configures RabbitMQ (it does, verified earlier). Let's do a final full review of the changed/added files together for consistency.
+
+Bash
+IN
+git status --short
+
+OUT
+ M README.md
+ M pom.xml
+ M src/main/java/com/releasepilot/application/commands/PromotionCommandService.java
+ M src/main/java/com/releasepilot/domain/promotion/DomainEvent.java
+ M src/main/java/com/releasepilot/domain/promotion/Promotion.java
+ M src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+ M src/test/java/com/releasepilot/domain/promotion/PromotionTest.java
+?? src/main/java/com/releasepilot/domain/ports/EventPublisherPort.java
+?? src/main/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisher.java
+?? src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+?? src/main/resources/db/migration/V2__create_outbox_events_table.sql
+?? src/test/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisherIT.java
+?? src/test/java/com/releasepilot/infrastructure/queue/
+Let me do a final read-through of the full Promotion.java to verify the diff is coherent end-to-end.
+
+Bash
+IN
+git diff -- src/main/java/com/releasepilot/domain/promotion/Promotion.java
+
+OUT
+diff --git a/src/main/java/com/releasepilot/domain/promotion/Promotion.java b/src/main/java/com/releasepilot/domain/promotion/Promotion.java
+index 0b9a0d3..cf0e2a4 100644
+--- a/src/main/java/com/releasepilot/domain/promotion/Promotion.java
++++ b/src/main/java/com/releasepilot/domain/promotion/Promotion.java
+@@ -6,7 +6,9 @@ import com.releasepilot.domain.promotion.errors.InvalidTransitionError;
+ import com.releasepilot.domain.promotion.errors.PromotionAlreadyTerminalError;
+ import com.releasepilot.domain.promotion.errors.UnauthorizedApproverError;
+ 
++import java.util.ArrayList;
+ import java.util.List;
++import java.util.Map;
+ import java.util.Objects;
+ import java.util.Optional;
+ 
+@@ -22,6 +24,13 @@ import java.util.Optional;
+  */
+ public final class Promotion {
+ 
++	public static final String EVENT_PROMOTION_REQUESTED = "PromotionRequested";
++	public static final String EVENT_PROMOTION_APPROVED = "PromotionApproved";
++	public static final String EVENT_DEPLOYMENT_STARTED = "DeploymentStarted";
++	public static final String EVENT_PROMOTION_COMPLETED = "PromotionCompleted";
++	public static final String EVENT_PROMOTION_ROLLED_BACK = "PromotionRolledBack";
++	public static final String EVENT_PROMOTION_CANCELLED = "PromotionCancelled";
++
+ 	private final PromotionId id;
+ 	private final ApplicationId applicationId;
+ 	private final Version version;
+@@ -31,6 +40,13 @@ public final class Promotion {
+ 	private PromotionStatus status;
+ 	private Actor approvedBy;
+ 
++	/**
++	 * Domain events recorded for transitions applied to this instance since the last
++	 * {@link #pullDomainEvents()} call. Never persisted and never populated by {@link #reconstitute},
++	 * since rehydrating a promotion from storage is not a new transition.
++	 */
++	private final List<DomainEvent> pendingEvents = new ArrayList<>();
++
+ 	private Promotion(
+ 			PromotionId id,
+ 			ApplicationId applicationId,
+@@ -83,9 +99,19 @@ public final class Promotion {
+ 			throw new DuplicatePromotionInProgressError(applicationId, targetEnvironment);
+ 		}
+ 
+-		return new Promotion(
++		Promotion promotion = new Promotion(
+ 				id, applicationId, version, lastCompletedEnvironment, targetEnvironment, requestedBy,
+ 				PromotionStatus.REQUESTED);
++
++		Map<String, Object> payload = lastCompletedEnvironment == null
++				? Map.of("version", version.value(), "targetEnvironment", targetEnvironment.name())
++				: Map.of(
++						"version", version.value(),
++						"fromEnvironment", lastCompletedEnvironment.name(),
++						"targetEnvironment", targetEnvironment.name());
++		promotion.recordEvent(EVENT_PROMOTION_REQUESTED, requestedBy, payload);
++
++		return promotion;
+ 	}
+ 
+ 	/**
+@@ -120,14 +146,22 @@ public final class Promotion {
+ 		}
+ 		this.status = PromotionStatus.APPROVED;
+ 		this.approvedBy = approver;
++		recordEvent(EVENT_PROMOTION_APPROVED, approver, Map.of("approvedBy", approver.userId()));
+ 	}
+ 
++	/**
++	 * The {@code deploymentRef} extra payload field (SPECS §5) is not known here — it comes back
++	 * from {@link com.releasepilot.domain.ports.DeploymentPort#trigger} after this transition
++	 * succeeds — so the recorded event carries an empty payload and the command handler enriches
++	 * it via {@link DomainEvent#withPayload} once the deployment has actually been triggered.
++	 */
+ 	public void startDeployment(Actor actor) {
+ 		requireNotTerminal();
+ 		if (status != PromotionStatus.APPROVED) {
+ 			throw new InvalidTransitionError(status, "StartDeployment");
+ 		}
+ 		this.status = PromotionStatus.IN_PROGRESS;
++		recordEvent(EVENT_DEPLOYMENT_STARTED, actor, Map.of());
+ 	}
+ 
+ 	public void complete(Actor actor) {
+@@ -136,6 +170,7 @@ public final class Promotion {
+ 			throw new InvalidTransitionError(status, "CompletePromotion");
+ 		}
+ 		this.status = PromotionStatus.COMPLETED;
++		recordEvent(EVENT_PROMOTION_COMPLETED, actor, Map.of());
+ 	}
+ 
+ 	public void rollback(Actor actor) {
+@@ -144,6 +179,7 @@ public final class Promotion {
+ 			throw new InvalidTransitionError(status, "RollbackPromotion");
+ 		}
+ 		this.status = PromotionStatus.ROLLED_BACK;
++		recordEvent(EVENT_PROMOTION_ROLLED_BACK, actor, Map.of());
+ 	}
+ 
+ 	/** Invariant #4/#5: cancellation is only possible before deployment has started. */
+@@ -153,6 +189,7 @@ public final class Promotion {
+ 			throw new InvalidTransitionError(status, "CancelPromotion");
+ 		}
+ 		this.status = PromotionStatus.CANCELLED;
++		recordEvent(EVENT_PROMOTION_CANCELLED, actor, Map.of());
+ 	}
+ 
+ 	private void requireNotTerminal() {
+@@ -161,6 +198,22 @@ public final class Promotion {
+ 		}
+ 	}
+ 
++	private void recordEvent(String eventType, Actor actingActor, Map<String, Object> payload) {
++		pendingEvents.add(DomainEvent.of(eventType, id, applicationId, actingActor, payload));
++	}
++
++	/**
++	 * Returns the domain events recorded by transitions applied since the last call, then clears
++	 * them. The application layer calls this right after persisting the aggregate's new state, and
++	 * publishes what it returns through {@code EventPublisherPort} — the transactional-outbox
++	 * adapter writes the event row in the same DB transaction as the state write (SPECS §5.1).
++	 */
++	public List<DomainEvent> pullDomainEvents() {
++		List<DomainEvent> events = List.copyOf(pendingEvents);
++		pendingEvents.clear();
++		return events;
++	}
++
+ 	public PromotionId id() {
+ 		return id;
+ 	}
+This all looks correct and coherent. Let's run the full unit test suite one final time to confirm everything is green after all changes.
+
+Bash
+IN
+timeout 120 ./mvnw test 2>&1 | grep -E "Tests run|BUILD"
+
+OUT
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.505 s -- in com.releasepilot.application.commands.PromotionCommandServiceTest
+[INFO] Tests run: 26, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in com.releasepilot.domain.promotion.PromotionTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.847 s -- in com.releasepilot.ReleasePilotApplicationTests
+[INFO] Tests run: 40, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+Built the event-publishing architecture end to end. Summary:
+
+Domain layer (Promotion aggregate stays Spring/port-free):
+
+Promotion now records a DomainEvent on every one of its six transitions (request, approve, startDeployment, complete, rollback, cancel) into an internal pending list, exposed via pullDomainEvents() (pull-and-clear). reconstitute() deliberately doesn't populate it — rehydration isn't a new transition.
+DomainEvent.withPayload(...) added, so DeploymentStarted's deploymentRef (only known after DeploymentPort.trigger returns) can be merged in after the fact without the aggregate needing to know about ports.
+New port EventPublisherPort (domain/ports/) — "hand this event off for reliable delivery," implemented outside the domain.
+Application layer:
+
+PromotionCommandService now takes EventPublisherPort and calls it right after repository.save(...) in every one of the six command handlers — the aggregate's port usage you asked for, kept at the application layer so the aggregate itself stays a pure, Spring-free, port-free object (matches SPECS §14's zero-infra aggregate unit tests).
+Infrastructure — the box (outbox) pattern:
+
+V2__create_outbox_events_table.sql — new outbox_events table, jsonb payload, published_at IS NULL marks undelivered.
+OutboxEventPublisher implements EventPublisherPort — plain JdbcTemplate insert, same connection the aggregate's own save uses, so state + event commit together.
+OutboxRelay — polls unsent outbox rows, publishes each to a promotion.events fanout RabbitMQ exchange via Spring AMQP, marks them sent. Fanout means future consumers (audit log, projector, notifications) each bind their own queue without touching the relay.
+Added spring-boot-starter-amqp and testcontainers-rabbitmq to pom.xml (dependency resolution verified).
+Tests: 40 unit tests pass (./mvnw test), including new coverage on Promotion.pullDomainEvents() and on PromotionCommandService proving each command publishes its event. Also added OutboxEventPublisherIT and OutboxRelayIT (Testcontainers Postgres/RabbitMQ) proving the outbox → queue hop actually works and isn't redelivered — same *IT convention as the existing repository test, so mvnw test skips them and mvnw verify runs them. I couldn't execute those two locally (no Docker in this sandbox), but they compile cleanly and will run in the existing integration-tests CI job.
+
+README.md updated with a new "Event publishing (transactional outbox)" section explaining the design.
+
+Neither OutboxEventPublisher nor OutboxRelay is wired into the Spring context yet — following the same "not yet registered as a Spring bean" convention already established by JdbcPromotionRepository, deferring full DI wiring to whichever branch connects the HTTP layer.
+

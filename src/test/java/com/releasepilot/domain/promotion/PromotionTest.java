@@ -232,4 +232,81 @@ class PromotionTest {
 		assertThatThrownBy(() -> promotion.approve(approver)).isInstanceOf(PromotionAlreadyTerminalError.class);
 		assertThat(promotion.status()).isEqualTo(PromotionStatus.CANCELLED);
 	}
+
+	// --- Domain events (pullDomainEvents) ---
+
+	@Test
+	void requestingRecordsAPromotionRequestedEventPulledExactlyOnce() {
+		Promotion promotion = requestedPromotion();
+
+		List<DomainEvent> events = promotion.pullDomainEvents();
+
+		assertThat(events).hasSize(1);
+		assertThat(events.get(0).eventType()).isEqualTo(Promotion.EVENT_PROMOTION_REQUESTED);
+		assertThat(events.get(0).promotionId()).isEqualTo(promotion.id());
+		assertThat(events.get(0).applicationId()).isEqualTo(applicationId);
+		assertThat(events.get(0).actingUser()).isEqualTo(requester.userId());
+		assertThat(promotion.pullDomainEvents()).isEmpty();
+	}
+
+	@Test
+	void eachTransitionRecordsExactlyOneNewEventSinceTheLastPull() {
+		Promotion promotion = requestedPromotion();
+		promotion.pullDomainEvents();
+
+		promotion.approve(approver);
+		List<DomainEvent> afterApprove = promotion.pullDomainEvents();
+		assertThat(afterApprove).extracting(event -> event.eventType()).containsExactly(Promotion.EVENT_PROMOTION_APPROVED);
+
+		promotion.startDeployment(approver);
+		List<DomainEvent> afterStart = promotion.pullDomainEvents();
+		assertThat(afterStart).extracting(event -> event.eventType()).containsExactly(Promotion.EVENT_DEPLOYMENT_STARTED);
+
+		promotion.complete(approver);
+		List<DomainEvent> afterComplete = promotion.pullDomainEvents();
+		assertThat(afterComplete).extracting(event -> event.eventType()).containsExactly(Promotion.EVENT_PROMOTION_COMPLETED);
+	}
+
+	@Test
+	void rollingBackRecordsAPromotionRolledBackEvent() {
+		Promotion promotion = inProgressPromotion();
+		promotion.pullDomainEvents();
+
+		promotion.rollback(approver);
+
+		assertThat(promotion.pullDomainEvents())
+				.extracting(event -> event.eventType())
+				.containsExactly(Promotion.EVENT_PROMOTION_ROLLED_BACK);
+	}
+
+	@Test
+	void cancellingRecordsAPromotionCancelledEvent() {
+		Promotion promotion = approvedPromotion();
+		promotion.pullDomainEvents();
+
+		promotion.cancel(requester);
+
+		assertThat(promotion.pullDomainEvents())
+				.extracting(event -> event.eventType())
+				.containsExactly(Promotion.EVENT_PROMOTION_CANCELLED);
+	}
+
+	@Test
+	void aRejectedCommandRecordsNoEvent() {
+		Promotion promotion = requestedPromotion();
+		promotion.pullDomainEvents();
+
+		assertThatThrownBy(() -> promotion.approve(requester)).isInstanceOf(UnauthorizedApproverError.class);
+
+		assertThat(promotion.pullDomainEvents()).isEmpty();
+	}
+
+	@Test
+	void reconstitutingDoesNotRecordAnyEvent() {
+		Promotion promotion = Promotion.reconstitute(
+				PromotionId.random(), applicationId, version, null, Environment.DEV, requester,
+				PromotionStatus.REQUESTED, null);
+
+		assertThat(promotion.pullDomainEvents()).isEmpty();
+	}
 }

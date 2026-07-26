@@ -1,0 +1,176 @@
+
+[ERROR] Tests run: 2, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 12.33 s <<< FAILURE! -- in com.releasepilot.infrastructure.queue.OutboxRelayIT
+[ERROR] com.releasepilot.infrastructure.queue.OutboxRelayIT.relayingPendingEventsDeliversThemToTheFanoutExchangeAndMarksThemSent -- Time elapsed: 0.034 s <<< ERROR!
+org.springframework.amqp.AmqpIOException: java.io.IOException
+	at org.springframework.amqp.rabbit.support.RabbitExceptionTranslator.convertRabbitAccessException(RabbitExceptionTranslator.java:69)
+	at org.springframework.amqp.rabbit.connection.RabbitAccessor.convertRabbitAccessException(RabbitAccessor.java:117)
+	at org.springframework.amqp.rabbit.core.RabbitTemplate.doExecute(RabbitTemplate.java:2259)
+	at org.springframework.amqp.rabbit.core.RabbitTemplate.execute(RabbitTemplate.java:2211)
+	at org.springframework.amqp.rabbit.core.RabbitTemplate.receive(RabbitTemplate.java:1317)
+	at com.releasepilot.infrastructure.queue.OutboxRelayIT.relayingPendingEventsDeliversThemToTheFanoutExchangeAndMarksThemSent(OutboxRelayIT.java:116)
+Caused by: java.io.IOException
+	at com.rabbitmq.client.impl.AMQChannel.wrap(AMQChannel.java:140)
+	at com.rabbitmq.client.impl.AMQChannel.wrap(AMQChannel.java:136)
+	at com.rabbitmq.client.impl.ChannelN.basicConsume(ChannelN.java:1419)
+	at com.rabbitmq.client.impl.ChannelN.basicConsume(ChannelN.java:1301)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.springframework.amqp.rabbit.connection.CachingConnectionFactory$CachedChannelInvocationHandler.invoke(CachingConnectionFactory.java:1221)
+	at jdk.proxy2/jdk.proxy2.$Proxy45.basicConsume(Unknown Source)
+	at org.springframework.amqp.rabbit.core.RabbitTemplate.createConsumer(RabbitTemplate.java:2777)
+	at org.springframework.amqp.rabbit.core.RabbitTemplate.consumeDelivery(RabbitTemplate.java:1508)
+	at org.springframework.amqp.rabbit.core.RabbitTemplate.lambda$receive$0(RabbitTemplate.java:1318)
+	at org.springframework.amqp.rabbit.core.RabbitTemplate.invokeAction(RabbitTemplate.java:2291)
+	at org.springframework.amqp.rabbit.core.RabbitTemplate.doExecute(RabbitTemplate.java:2253)
+	... 3 more
+Caused by: com.rabbitmq.client.ShutdownSignalException: channel error; protocol method: #method<channel.close>(reply-code=404, reply-text=NOT_FOUND - no queue 'test.promotion-events.a08b9377-b94c-43b5-829a-eeb347b11d7b' in vhost '/', class-id=60, method-id=20)
+	at com.rabbitmq.utility.ValueOrException.getValue(ValueOrException.java:66)
+	at com.rabbitmq.utility.BlockingValueOrException.uninterruptibleGetValue(BlockingValueOrException.java:36)
+	at com.rabbitmq.client.impl.AMQChannel$BlockingRpcContinuation.getReply(AMQChannel.java:552)
+	at com.rabbitmq.client.impl.ChannelN.basicConsume(ChannelN.java:1413)
+	... 13 more
+Caused by: com.rabbitmq.client.ShutdownSignalException: channel error; protocol method: #method<channel.close>(reply-code=404, reply-text=NOT_FOUND - no queue 'test.promotion-events.a08b9377-b94c-43b5-829a-eeb347b11d7b' in vhost '/', class-id=60, method-id=20)
+	at com.rabbitmq.client.impl.ChannelN.asyncShutdown(ChannelN.java:529)
+	at com.rabbitmq.client.impl.ChannelN.processAsync(ChannelN.java:350)
+	at com.rabbitmq.client.impl.AMQChannel.handleCompleteInboundCommand(AMQChannel.java:193)
+	at com.rabbitmq.client.impl.AMQChannel.handleFrame(AMQChannel.java:125)
+	at com.rabbitmq.client.impl.AMQConnection.readFrame(AMQConnection.java:768)
+	at com.rabbitmq.client.impl.AMQConnection.access$400(AMQConnection.java:49)
+	at com.rabbitmq.client.impl.AMQConnection$MainLoop.run(AMQConnection.java:695)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Errors: 
+[ERROR]   OutboxRelayIT.relayingPendingEventsDeliversThemToTheFanoutExchangeAndMarksThemSent:116 » AmqpIO java.io.IOException
+[INFO] 
+[ERROR] Tests run: 12, Failures: 0, Errors: 1, Skipped: 0
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test -path '*/queue/*' -iname '*Outbox*' -o -iname '*OutboxRelay*'
+
+OUT
+/home/juanjo/git/agile-monkeys-test/target/test-classes/com/releasepilot/infrastructure/queue/OutboxRelayIT.class
+/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/infrastructure/queue/OutboxRelay.class
+/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/infrastructure/queue/OutboxRelay$1.class
+/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/infrastructure/queue/OutboxRelay$OutboxRow.class
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/queue/OutboxRelayIT.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+Read OutboxRelayIT.java
+Read OutboxRelay.java
+Bash
+IN
+git log --oneline -5 -- src/test/java/com/releasepilot/infrastructure/queue/OutboxRelayIT.java src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java && echo --- && grep -n "testcontainers\|rabbitmq\|amqp" pom.xml
+
+OUT
+c5fabce add event sending on every command
+---
+38:			<artifactId>spring-boot-starter-amqp</artifactId>
+58:			<groupId>org.testcontainers</groupId>
+59:			<artifactId>testcontainers-junit-jupiter</artifactId>
+64:			<groupId>org.testcontainers</groupId>
+65:			<artifactId>testcontainers-postgresql</artifactId>
+70:			<groupId>org.testcontainers</groupId>
+71:			<artifactId>testcontainers-rabbitmq</artifactId>
+Bash
+IN
+git show --stat c5fabce | head -30
+
+OUT
+commit c5fabceefc0027cb2be684f4d886d0a9261c8909
+Author: suken27 <suken2727@gmail.com>
+Date:   Sun Jul 26 19:11:54 2026 +0200
+
+    add event sending on every command
+
+ AI-chat-logs/011.txt                               | 1993 ++++++++++++++++++++
+ README.md                                          |   42 +
+ pom.xml                                            |   11 +
+ .../commands/PromotionCommandService.java          |   34 +-
+ .../domain/ports/EventPublisherPort.java           |   16 +
+ .../releasepilot/domain/promotion/DomainEvent.java |   13 +
+ .../releasepilot/domain/promotion/Promotion.java   |   55 +-
+ .../persistence/OutboxEventPublisher.java          |   45 +
+ .../infrastructure/queue/OutboxRelay.java          |  107 ++
+ .../migration/V2__create_outbox_events_table.sql   |   13 +
+ .../commands/PromotionCommandServiceTest.java      |   97 +-
+ .../domain/promotion/PromotionTest.java            |   77 +
+ .../persistence/OutboxEventPublisherIT.java        |   90 +
+ .../infrastructure/queue/OutboxRelayIT.java        |  136 ++
+ 14 files changed, 2725 insertions(+), 4 deletions(-)
+Bash
+IN
+docker info >/dev/null 2>&1 && echo "docker OK" || echo "no docker"; ls
+
+OUT
+no docker
+AI-chat-logs
+docker-compose.yml
+Dockerfile
+mvnw
+mvnw.cmd
+originalDescription.md
+pom.xml
+README.md
+SPECS.md
+src
+target
+Bash
+IN
+grep -n -i "outboxrelay\|autoDelete\|exclusive\|queue(" /home/juanjo/git/agile-monkeys-test/AI-chat-logs/011.txt | head -80
+
+OUT
+864:  public java.lang.String declareQueue(org.springframework.amqp.core.Queue);
+865:  public org.springframework.amqp.core.Queue declareQueue();
+1176:-- Scopes OutboxRelay's poll for events not yet delivered to the broker.
+1195: * {@link com.releasepilot.infrastructure.queue.OutboxRelay} is the separate, decoupled component
+1225:Write OutboxRelay.java
+1258:public class OutboxRelay {
+1262:	private static final RowMapper<OutboxRow> ROW_MAPPER = OutboxRelay::mapRow;
+1268:	public OutboxRelay(JdbcTemplate jdbcTemplate, RabbitTemplate rabbitTemplate, ObjectMapper objectMapper) {
+1430: * left {@code NULL} until {@link com.releasepilot.infrastructure.queue.OutboxRelay} delivers it.
+1492:Write OutboxRelayIT.java
+1531: * Exercises {@link OutboxRelay} against real PostgreSQL and RabbitMQ instances (via Testcontainers):
+1533: * {@value OutboxRelay#PROMOTION_EVENTS_EXCHANGE} fanout exchange, that {@code published_at} gets
+1540:class OutboxRelayIT {
+1555:	private static OutboxRelay relay;
+1582:		relay = new OutboxRelay(jdbcTemplate, rabbitTemplate, objectMapper);
+1585:		FanoutExchange exchange = new FanoutExchange(OutboxRelay.PROMOTION_EVENTS_EXCHANGE);
+1587:		testQueue = new Queue("test.promotion-events." + UUID.randomUUID(), false, false, true);
+1588:		admin.declareQueue(testQueue);
+1671:javap -public -cp "$jar" org.springframework.amqp.core.Queue 2>&1 | grep "Queue("
+1678:  public org.springframework.amqp.core.Queue(java.lang.String);
+1679:  public org.springframework.amqp.core.Queue(java.lang.String, boolean);
+1680:  public org.springframework.amqp.core.Queue(java.lang.String, boolean, boolean, boolean);
+1681:  public org.springframework.amqp.core.Queue(java.lang.String, boolean, boolean, boolean, java.util.Map<java.lang.String, java.lang.Object>);
+1703:Confirmed — .to(FanoutExchange) returns Binding directly, matching what I wrote. All the AMQP API usage checks out. Let's also verify RabbitAdmin.declareQueue(Queue) returns the queue name (used it correctly, ignoring return value) and double check my code compiles against these exact signatures once more with a full clean build.
+1816:?? src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+1986:OutboxRelay — polls unsent outbox rows, publishes each to a promotion.events fanout RabbitMQ exchange via Spring AMQP, marks them sent. Fanout means future consumers (audit log, projector, notifications) each bind their own queue without touching the relay.
+1988:Tests: 40 unit tests pass (./mvnw test), including new coverage on Promotion.pullDomainEvents() and on PromotionCommandService proving each command publishes its event. Also added OutboxEventPublisherIT and OutboxRelayIT (Testcontainers Postgres/RabbitMQ) proving the outbox → queue hop actually works and isn't redelivered — same *IT convention as the existing repository test, so mvnw test skips them and mvnw verify runs them. I couldn't execute those two locally (no Docker in this sandbox), but they compile cleanly and will run in the existing integration-tests CI job.
+1992:Neither OutboxEventPublisher nor OutboxRelay is wired into the Spring context yet — following the same "not yet registered as a Spring bean" convention already established by JdbcPromotionRepository, deferring full DI wiring to whichever branch connects the HTTP layer.
+Found it. The root cause is in OutboxRelayIT.java:94 — the test queue is declared with autoDelete=true:
+
+
+testQueue = new Queue("test.promotion-events." + UUID.randomUUID(), false, false, true);
+RabbitMQ auto-delete semantics: a queue is deleted once its consumer count drops to zero, provided it has had at least one consumer. RabbitTemplate.receive(queue, timeout) subscribes a temporary consumer and cancels it right after (whether it got a message or timed out). JUnit doesn't guarantee test method execution order here, so whichever test runs first does a receive() call that subscribes-then-cancels — triggering RabbitMQ to auto-delete the queue since it just had its first-ever consumer drop to zero. The second test's receive() call then hits a queue that no longer exists, producing exactly the 404 NOT_FOUND seen in the failure (2 tests run, 1 error — the one that happened to execute second).
+
+The fix is to stop the queue from auto-deleting itself after the first receive:
+
+Edit OutboxRelayIT.java
+Modified
+Read OutboxRelayIT.java (lines 89-98)
+Good, the fix is in place. No docker available in this sandbox so I can't re-run the Testcontainers-based IT locally, but let's at least confirm the module still compiles.
+
+Bash
+IN
+./mvnw -q -o test-compile 2>&1 | tail -50
+
+OUT
+(Bash completed with no output)
+Compiles cleanly.
+
+Root cause: OutboxRelayIT.java:94 declared the shared test queue with autoDelete=true. RabbitMQ auto-delete queues are removed once their consumer count drops to zero — but only after they've had at least one consumer. RabbitTemplate.receive(queue, timeout) opens a consumer and cancels it right after (message received or not). Since JUnit doesn't guarantee test method order, whichever of the two @Test methods ran first consumed-and-cancelled on the queue, causing RabbitMQ to auto-delete it — so the second test's receive() call hit a 404 NOT_FOUND, matching the observed "2 tests run, 1 error."
+
+Fix: changed the Queue declaration to autoDelete=false so it persists for the life of the test class (it's still an ephemeral, uniquely-named, non-durable queue tied to the per-class Testcontainers RabbitMQ instance, cleaned up when the container is destroyed).
+
