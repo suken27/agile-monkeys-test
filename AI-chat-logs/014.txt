@@ -1,0 +1,2920 @@
+
+SPECS.md
+create the http queries and commands, follow @SPECS.md guidelines, make sure to respect DDD, hexagonal patern and CQRS
+Bash
+IN
+find . -path ./node_modules -prune -o -type f -name "*.java" -print | sort
+
+OUT
+./src/main/java/com/releasepilot/application/commands/PromotionCommandPort.java
+./src/main/java/com/releasepilot/application/commands/PromotionCommandService.java
+./src/main/java/com/releasepilot/application/commands/PromotionNotFoundException.java
+./src/main/java/com/releasepilot/domain/ports/DeploymentPort.java
+./src/main/java/com/releasepilot/domain/ports/DeploymentRef.java
+./src/main/java/com/releasepilot/domain/ports/EventPublisherPort.java
+./src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java
+./src/main/java/com/releasepilot/domain/ports/NotificationPort.java
+./src/main/java/com/releasepilot/domain/ports/PromotionRepositoryPort.java
+./src/main/java/com/releasepilot/domain/ports/WorkItem.java
+./src/main/java/com/releasepilot/domain/promotion/Actor.java
+./src/main/java/com/releasepilot/domain/promotion/ApplicationId.java
+./src/main/java/com/releasepilot/domain/promotion/DomainEvent.java
+./src/main/java/com/releasepilot/domain/promotion/Environment.java
+./src/main/java/com/releasepilot/domain/promotion/errors/DomainError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/DuplicatePromotionInProgressError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/EnvironmentSkippedError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/InvalidTransitionError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/PromotionAlreadyTerminalError.java
+./src/main/java/com/releasepilot/domain/promotion/errors/UnauthorizedApproverError.java
+./src/main/java/com/releasepilot/domain/promotion/PromotionId.java
+./src/main/java/com/releasepilot/domain/promotion/Promotion.java
+./src/main/java/com/releasepilot/domain/promotion/PromotionStatus.java
+./src/main/java/com/releasepilot/domain/promotion/Role.java
+./src/main/java/com/releasepilot/domain/promotion/Version.java
+./src/main/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepository.java
+./src/main/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisher.java
+./src/main/java/com/releasepilot/infrastructure/queue/OutboxRelay.java
+./src/main/java/com/releasepilot/ReleasePilotApplication.java
+./src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+./src/test/java/com/releasepilot/domain/promotion/PromotionTest.java
+./src/test/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepositoryIT.java
+./src/test/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisherIT.java
+./src/test/java/com/releasepilot/infrastructure/queue/OutboxRelayIT.java
+./src/test/java/com/releasepilot/ReleasePilotApplicationTests.java
+Read PromotionCommandPort.java
+Read PromotionCommandService.java
+Read Promotion.java
+Read JdbcPromotionRepository.java
+Read PromotionRepositoryPort.java
+Read EventPublisherPort.java
+Read DomainEvent.java
+Read DomainError.java
+Bash
+IN
+for f in /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/*.java; do echo "=== $f ==="; cat "$f"; done
+
+OUT
+=== /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/DomainError.java ===
+package com.releasepilot.domain.promotion.errors;
+
+/**
+ * Base type for every business rule violation raised by the {@code Promotion} aggregate.
+ * Domain errors are always mapped to 4xx responses at the API boundary — they never surface
+ * as uncaught exceptions (never 500).
+ */
+public abstract sealed class DomainError extends RuntimeException permits
+		InvalidTransitionError,
+		EnvironmentSkippedError,
+		UnauthorizedApproverError,
+		PromotionAlreadyTerminalError,
+		DuplicatePromotionInProgressError {
+
+	protected DomainError(String message) {
+		super(message);
+	}
+}
+=== /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/DuplicatePromotionInProgressError.java ===
+package com.releasepilot.domain.promotion.errors;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+
+/**
+ * Raised when a promotion is requested for an (application, target environment) pair that
+ * already has a non-terminal promotion in flight (invariant #2).
+ */
+public final class DuplicatePromotionInProgressError extends DomainError {
+
+	public DuplicatePromotionInProgressError(ApplicationId applicationId, Environment targetEnvironment) {
+		super("A non-terminal promotion already exists for application %s targeting %s"
+				.formatted(applicationId.value(), targetEnvironment));
+	}
+}
+=== /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/EnvironmentSkippedError.java ===
+package com.releasepilot.domain.promotion.errors;
+
+import com.releasepilot.domain.promotion.Environment;
+
+/**
+ * Raised when a promotion is requested for a target environment that is not the immediate
+ * next step after the version's last completed environment (invariant #1, no skipping).
+ */
+public final class EnvironmentSkippedError extends DomainError {
+
+	public EnvironmentSkippedError(Environment expectedTarget, Environment requestedTarget) {
+		super("Expected target environment %s but got %s".formatted(expectedTarget, requestedTarget));
+	}
+
+	public EnvironmentSkippedError(Environment requestedTarget) {
+		super("Version has already completed the last pipeline environment; cannot target %s"
+				.formatted(requestedTarget));
+	}
+}
+=== /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/InvalidTransitionError.java ===
+package com.releasepilot.domain.promotion.errors;
+
+import com.releasepilot.domain.promotion.PromotionStatus;
+
+/**
+ * Raised when a command is issued against a promotion whose current (non-terminal) status
+ * does not permit that transition (e.g. cancelling a promotion that is already in progress).
+ */
+public final class InvalidTransitionError extends DomainError {
+
+	public InvalidTransitionError(PromotionStatus from, String command) {
+		super("Cannot apply command '%s' to a promotion in status %s".formatted(command, from));
+	}
+}
+=== /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/PromotionAlreadyTerminalError.java ===
+package com.releasepilot.domain.promotion.errors;
+
+import com.releasepilot.domain.promotion.PromotionStatus;
+
+/**
+ * Raised when any command is issued against a promotion already in a terminal state
+ * (Completed, RolledBack or Cancelled). No field on a terminal promotion may change.
+ */
+public final class PromotionAlreadyTerminalError extends DomainError {
+
+	public PromotionAlreadyTerminalError(PromotionStatus status) {
+		super("Promotion is already in terminal status %s and cannot be modified".formatted(status));
+	}
+}
+=== /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors/UnauthorizedApproverError.java ===
+package com.releasepilot.domain.promotion.errors;
+
+/**
+ * Raised when {@code ApprovePromotion} is attempted by an actor without the approver role.
+ */
+public final class UnauthorizedApproverError extends DomainError {
+
+	public UnauthorizedApproverError(String userId) {
+		super("User '%s' does not have the approver role".formatted(userId));
+	}
+}
+Read PromotionId.java
+Read ApplicationId.java
+Read Version.java
+Read Environment.java
+Read Actor.java
+Read Role.java
+Read PromotionStatus.java
+Read PromotionNotFoundException.java
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test/src/main/resources -type f | sort; echo "---pom---"; cat /home/juanjo/git/agile-monkeys-test/pom.xml; echo "---compose---"; cat /home/juanjo/git/agile-monkeys-test/docker-compose.yml 2>/dev/null
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/resources/application.yml
+/home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration/V1__create_promotions_table.sql
+/home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration/V2__create_outbox_events_table.sql
+---pom---
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.0.7</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.releasepilot</groupId>
+	<artifactId>releasepilot</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>ReleasePilot</name>
+	<description>ReleasePilot promotion pipeline service</description>
+	<properties>
+		<java.version>21</java.version>
+	</properties>
+	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-jdbc</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-amqp</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-rabbitmq</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>
+---compose---
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: releasepilot
+      POSTGRES_USER: releasepilot
+      POSTGRES_PASSWORD: releasepilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U releasepilot -d releasepilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: releasepilot
+      RABBITMQ_DEFAULT_PASS: releasepilot
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: ghcr.io/suken27/agile-monkeys-test:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/releasepilot
+      SPRING_DATASOURCE_USERNAME: releasepilot
+      SPRING_DATASOURCE_PASSWORD: releasepilot
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: releasepilot
+      SPRING_RABBITMQ_PASSWORD: releasepilot
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+Read ReleasePilotApplication.java
+Read OutboxEventPublisher.java
+Read OutboxRelay.java
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test/src -type d | sort; echo "---migrations---"; for f in /home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration/*.sql; do echo "=== $f ==="; cat "$f"; done; echo "---appyml---"; cat /home/juanjo/git/agile-monkeys-test/src/main/resources/application.yml
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src
+/home/juanjo/git/agile-monkeys-test/src/main
+/home/juanjo/git/agile-monkeys-test/src/main/java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/controllers
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/queries
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/consumers
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/promotion/errors
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/adapters
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/adapters/inmemory
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence/readmodel
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue
+/home/juanjo/git/agile-monkeys-test/src/main/resources
+/home/juanjo/git/agile-monkeys-test/src/main/resources/db
+/home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration
+/home/juanjo/git/agile-monkeys-test/src/test
+/home/juanjo/git/agile-monkeys-test/src/test/java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application/commands
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/domain
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/domain/promotion
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/persistence
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/queue
+/home/juanjo/git/agile-monkeys-test/src/test/resources
+---migrations---
+=== /home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration/V1__create_promotions_table.sql ===
+CREATE TABLE promotions (
+    id                   UUID PRIMARY KEY,
+    application_id       UUID NOT NULL,
+    version              VARCHAR(255) NOT NULL,
+    from_environment      VARCHAR(20),
+    target_environment    VARCHAR(20) NOT NULL,
+    requested_by_user_id  VARCHAR(255) NOT NULL,
+    requested_by_role     VARCHAR(20) NOT NULL,
+    status               VARCHAR(20) NOT NULL,
+    approved_by_user_id   VARCHAR(255),
+    approved_by_role      VARCHAR(20)
+);
+
+-- Scopes PromotionRepositoryPort#findActivePromotionsForTarget (invariant #2).
+CREATE INDEX idx_promotions_application_target ON promotions (application_id, target_environment);
+
+-- Scopes PromotionRepositoryPort#findLastCompletedEnvironment (invariant #1).
+CREATE INDEX idx_promotions_application_version ON promotions (application_id, version);
+=== /home/juanjo/git/agile-monkeys-test/src/main/resources/db/migration/V2__create_outbox_events_table.sql ===
+CREATE TABLE outbox_events (
+    id               UUID PRIMARY KEY,
+    event_type       VARCHAR(50) NOT NULL,
+    promotion_id     UUID NOT NULL,
+    application_id   UUID NOT NULL,
+    acting_user      VARCHAR(255) NOT NULL,
+    occurred_at      TIMESTAMPTZ NOT NULL,
+    payload          JSONB NOT NULL,
+    published_at     TIMESTAMPTZ
+);
+
+-- Scopes OutboxRelay's poll for events not yet delivered to the broker.
+CREATE INDEX idx_outbox_events_unpublished ON outbox_events (occurred_at) WHERE published_at IS NULL;
+---appyml---
+spring:
+  application:
+    name: ReleasePilot
+Bash
+IN
+git -C /home/juanjo/git/agile-monkeys-test log --oneline --all | head -30; echo "---branches---"; git -C /home/juanjo/git/agile-monkeys-test branch -a
+
+OUT
+ae236fb Merge pull request #6 from suken27/05-event-broker-port-and-adapter
+837b989 fix integration test
+c5fabce add event sending on every command
+db38daf Merge pull request #5 from suken27/04-local-docker-compose-deployment
+b3bee15 add docker compose file for local testing
+279b09d Merge pull request #4 from suken27/03-persistance-adapter
+c1474cb fix small warnings
+22afde1 add persistance adapter and github actions pipeline definition
+5e6b972 Merge pull request #3 from suken27/02-domain-logic-and-empty-ports
+5d6ed1b add domain logic and output ports, implement input port
+90672ac Merge pull request #2 from suken27/01-project-initialization
+6c8dceb initialize springboot project and folder structure
+30271e7 Merge pull request #1 from suken27/00-specs
+178e76f modify specs file to use Java as languaje and Spring as framework
+1519ce0 add claude chat log
+99d0a66 add first generated specs file
+5b46a95 add original description and create the main branch
+---branches---
+  00-specs
+  01-project-initialization
+  02-domain-logic-and-empty-ports
+  03-persistance-adapter
+  04-local-docker-compose-deployment
+  05-event-broker-port-and-adapter
+* 06-http-queries-and-commands
+  main
+  remotes/origin/00-specs
+  remotes/origin/01-project-initialization
+  remotes/origin/02-domain-logic-and-empty-ports
+  remotes/origin/03-persistance-adapter
+  remotes/origin/04-local-docker-compose-deployment
+  remotes/origin/05-event-broker-port-and-adapter
+  remotes/origin/main
+Bash
+IN
+for d in api/controllers application/queries consumers infrastructure/adapters/inmemory infrastructure/persistence/readmodel; do echo "=== $d ==="; find /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/$d -type f; done
+
+OUT
+=== api/controllers ===
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/controllers/.gitkeep
+=== application/queries ===
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/queries/.gitkeep
+=== consumers ===
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/consumers/.gitkeep
+=== infrastructure/adapters/inmemory ===
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/adapters/inmemory/.gitkeep
+=== infrastructure/persistence/readmodel ===
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence/readmodel/.gitkeep
+Read DeploymentPort.java
+Read DeploymentRef.java
+Read IssueTrackerPort.java
+Read WorkItem.java
+Read NotificationPort.java
+Bash
+IN
+find . -maxdepth 1 -iname "CLAUDE.md" -o -maxdepth 1 -iname "README*"; cat README.md 2>/dev/null | head -100; echo "---gh prs---"; gh pr list --state all 2>&1 | head -20
+
+OUT
+./README.md
+# ReleasePilot
+
+ReleasePilot is an internal platform that moves an application version through
+an ordered pipeline of deployment environments (`dev → staging → production`).
+It is modeled with **DDD** (a `Promotion` aggregate that owns all business
+rules), **CQRS** (separate write and read paths), and **domain events** (every
+state transition is published and consumed asynchronously).
+
+The API is intentionally thin: it validates input and translates HTTP into
+commands/queries. All business logic — legality of a transition, who can
+approve what, immutability after a terminal state — lives inside the
+aggregate. Rule violations are domain errors mapped to 4xx responses, never
+uncaught exceptions.
+
+See [SPECS.md](SPECS.md) for the full technical specification.
+
+## Tech stack
+
+- Java 21
+- Spring Boot 4 (Spring Web)
+- Maven (via the included Maven Wrapper)
+
+## Prerequisites
+
+- Java 21 (JDK)
+
+No local Maven installation is required — this project uses the Maven
+Wrapper (`mvnw`).
+
+## Running the application
+
+From the project root:
+
+```bash
+./mvnw spring-boot:run
+```
+
+On Windows:
+
+```bash
+mvnw.cmd spring-boot:run
+```
+
+The application starts on [http://localhost:8080](http://localhost:8080).
+
+## Building
+
+```bash
+./mvnw clean package
+```
+
+Produces an executable jar in `target/`, which can be run with:
+
+```bash
+java -jar target/releasepilot-0.0.1-SNAPSHOT.jar
+```
+
+## Running tests
+
+```bash
+./mvnw test
+```
+
+This runs the unit test suite only (aggregate + command-service tests) — it needs no database,
+Docker, or other infrastructure, and finishes in a few seconds. Persistence integration tests
+are excluded by naming convention (`*Test` vs `*IT`, see below).
+
+### Persistence integration tests
+
+`JdbcPromotionRepositoryIT` (`src/test/java/.../infrastructure/persistence/`) exercises
+`JdbcPromotionRepository` against a real, disposable PostgreSQL instance started automatically by
+[Testcontainers](https://testcontainers.com/) — no manual database setup is required, but
+**Docker must be installed and running** (the container image `postgres:16-alpine` is pulled and
+started/stopped per test run).
+
+It's named `*IT` rather than `*Test` specifically so the default `./mvnw test` (Surefire) skips
+it; only Maven's `verify` lifecycle phase (bound to the Failsafe plugin) runs it:
+
+```bash
+./mvnw verify
+```
+
+To run just the integration tests without the rest of the `verify` lifecycle:
+
+```bash
+./mvnw failsafe:integration-test
+```
+
+What it proves: the adapter's SQL round-trips every field of a `Promotion` (including the
+optional `fromEnvironment`/`approvedBy`), the aggregate can keep applying its own guarded
+transitions across a save → reload cycle, and the two invariant-scoped queries
+(`findActivePromotionsForTarget`, `findLastCompletedEnvironment`) filter correctly at the SQL
+level — including a couple of tests that replay the exact repository-then-aggregate call sequence
+`PromotionCommandService` uses, so a passing run means the adapter and the domain layer genuinely
+agree on how a `Promotion` invariant is enforced across a reload, not just that each side works in
+isolation.
+
+## CI/CD
+
+Two GitHub Actions workflows live in `.github/workflows/`:
+---gh prs---
+/bin/bash: line 1: gh: command not found
+Bash
+IN
+git log --format='%H %s' -1 05-event-broker-port-and-adapter; git show ae236fb --stat | head -50
+
+OUT
+837b989a5ebd17df3d9598ee4d615240bf55b0d7 fix integration test
+commit ae236fba88ccce6ff031974385fd96ed4f38c037
+Merge: db38daf 837b989
+Author: suken27 <48246954+suken27@users.noreply.github.com>
+Date:   Sun Jul 26 19:22:52 2026 +0200
+
+    Merge pull request #6 from suken27/05-event-broker-port-and-adapter
+    
+    Add event sending on every command
+
+ AI-chat-logs/011.txt                               | 1993 ++++++++++++++++++++
+ AI-chat-logs/012.txt                               |  176 ++
+ README.md                                          |   42 +
+ pom.xml                                            |   11 +
+ .../commands/PromotionCommandService.java          |   34 +-
+ .../domain/ports/EventPublisherPort.java           |   16 +
+ .../releasepilot/domain/promotion/DomainEvent.java |   13 +
+ .../releasepilot/domain/promotion/Promotion.java   |   55 +-
+ .../persistence/OutboxEventPublisher.java          |   45 +
+ .../infrastructure/queue/OutboxRelay.java          |  107 ++
+ .../migration/V2__create_outbox_events_table.sql   |   13 +
+ .../commands/PromotionCommandServiceTest.java      |   97 +-
+ .../domain/promotion/PromotionTest.java            |   77 +
+ .../persistence/OutboxEventPublisherIT.java        |   90 +
+ .../infrastructure/queue/OutboxRelayIT.java        |  136 ++
+ 15 files changed, 2901 insertions(+), 4 deletions(-)
+Read PromotionCommandServiceTest.java
+Read PromotionTest.java
+Read OutboxEventPublisherIT.java
+Read JdbcPromotionRepositoryIT.java
+Read ReleasePilotApplicationTests.java
+Bash
+IN
+find /home/juanjo/git/agile-monkeys-test/src/test/resources -type f; echo "---"; cat /home/juanjo/git/agile-monkeys-test/src/test/resources/*.yml 2>/dev/null; echo "---profiles in main---"; grep -r "datasource\|profile" /home/juanjo/git/agile-monkeys-test/src/main/resources/ 2>/dev/null
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/test/resources/application.yml
+---
+spring:
+  autoconfigure:
+    exclude: org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+---profiles in main---
+Bash
+IN
+./mvnw -q -o test -Dtest=ReleasePilotApplicationTests 2>&1 | tail -60
+
+OUT
+19:32:29.294 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:32:29.329 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+19:32:29.357 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.ReleasePilotApplicationTests]: ReleasePilotApplicationTests does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:32:29.359 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.ReleasePilotApplicationTests
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T19:32:29.494+02:00  INFO 169998 --- [           main] c.r.ReleasePilotApplicationTests         : Starting ReleasePilotApplicationTests using Java 21.0.11 with PID 169998 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T19:32:29.495+02:00  INFO 169998 --- [           main] c.r.ReleasePilotApplicationTests         : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T19:32:29.989+02:00  INFO 169998 --- [           main] c.r.ReleasePilotApplicationTests         : Started ReleasePilotApplicationTests in 0.609 seconds (process running for 1.008)
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+Update Todos
+
+Add optional reason to Promotion.rollback/cancel + command port/service overloads
+
+Move PromotionNotFoundException to shared application package
+
+Build query application layer (DTOs, PromotionQueryPort/Service, PromotionReadModelPort)
+
+Add read-model Flyway migration + JdbcPromotionReadModelRepository
+
+Add InMemoryDeploymentAdapter and wire Spring beans (@Repository/@Component/@Service)
+
+Build API layer: DTOs, PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Update/add tests (domain, command service, query service, read-model IT, web layer)
+
+Run full build/test suite and fix issues
+Starting with the domain layer: adding optional reason support to rollback/cancel (a genuine SPECS gap) and wiring it through the command port/service.
+
+Edit Promotion.java
+Added 14 lines
+Now the command port and service:
+
+Edit PromotionCommandPort.java
+Added 4 lines
+Edit PromotionCommandService.java
+Added 3 lines
+Expected — I haven't created the moved exception class or the new overrides yet. Let me do both now.
+
+Write PromotionNotFoundException.java
+16 lines
+package com.releasepilot.application;
+
+import com.releasepilot.domain.promotion.PromotionId;
+
+/**
+ * Raised when a command or query targets a {@code promotionId} that does not exist. Shared by
+ * both the command and query application services, since "not found" is not itself a business
+ * rule violation raised by the {@code Promotion} aggregate (it never gets the chance to load).
+ */
+public final class PromotionNotFoundException extends RuntimeException {
+
+	public PromotionNotFoundException(PromotionId promotionId) {
+		super("No promotion found with id %s".formatted(promotionId.value()));
+	}
+}
+Bash
+IN
+rm /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands/PromotionNotFoundException.java
+
+OUT
+(Bash completed with no output)
+Now update PromotionCommandService with the @Service/@Transactional annotations and the reason-aware overloads:
+
+Edit PromotionCommandService.java
+Added 5 lines
+Edit PromotionCommandService.java
+Added 1 line
+Edit PromotionCommandService.java
+Added 1 line
+Edit PromotionCommandService.java
+Added 1 line
+Edit PromotionCommandService.java
+Added 1 line
+Now the rollback/cancel methods with the new reason overloads:
+
+Edit PromotionCommandService.java
+Added 12 lines
+Now update the test file's import for the moved exception:
+
+Bash
+IN
+grep -rln "application.commands.PromotionNotFoundException\|import com.releasepilot.application.commands.PromotionNotFoundException" /home/juanjo/git/agile-monkeys-test/src
+
+OUT
+(Bash completed with no output)
+Bash
+IN
+grep -n "PromotionNotFoundException" /home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+
+OUT
+141:				.isInstanceOf(PromotionNotFoundException.class);
+Edit PromotionCommandServiceTest.java
+Added 1 line
+Now let me add tests for the reason overloads in PromotionTest and PromotionCommandServiceTest, then move on.
+
+Edit PromotionTest.java
+Added 31 lines
+Edit PromotionCommandServiceTest.java
+Added 25 lines
+Now let's check for other usages of PromotionNotFoundException (e.g., in .gitkeep scaffolding or other tests) before moving on:
+
+Bash
+IN
+grep -rln "PromotionNotFoundException" /home/juanjo/git/agile-monkeys-test/src
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/PromotionNotFoundException.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/commands/PromotionCommandService.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+Good, all references accounted for. Let's compile just to catch mistakes early before continuing.
+
+Bash
+IN
+./mvnw -q -o compile 2>&1 | tail -80
+
+OUT
+(Bash completed with no output)
+Compiles clean. Now on to the query application layer.
+
+Update Todos
+
+Add optional reason to Promotion.rollback/cancel + command port/service overloads
+
+Move PromotionNotFoundException to shared application package
+
+Build query application layer (DTOs, PromotionQueryPort/Service, PromotionReadModelPort)
+
+Add read-model Flyway migration + JdbcPromotionReadModelRepository
+
+Add InMemoryDeploymentAdapter and wire Spring beans (@Repository/@Component/@Service)
+
+Build API layer: DTOs, PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Update/add tests (domain, command service, query service, read-model IT, web layer)
+
+Run full build/test suite and fix issues
+Write PromotionDetail.java
+32 lines
+package com.releasepilot.application.queries;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.PromotionStatus;
+import com.releasepilot.domain.promotion.Version;
+
+import java.time.Instant;
+import java.util.List;
+
+/**
+ * Read model backing {@code GET /promotions/:id} (SPECS §7). Shaped for its one consumer, not for
+ * the {@code Promotion} aggregate's internal representation — {@link #history} in particular is
+ * built by the read-model projector appending one row per consumed event (SPECS §8), not
+ * recomputed from the write side on read.
+ */
+public record PromotionDetail(
+		PromotionId id,
+		ApplicationId applicationId,
+		Version version,
+		Environment fromEnvironment,
+		Environment targetEnvironment,
+		PromotionStatus status,
+		String requestedBy,
+		String approvedBy,
+		List<PromotionHistoryEntry> history) {
+
+	public record PromotionHistoryEntry(PromotionStatus status, String actor, Instant occurredAt) {
+	}
+}
+Write ApplicationEnvironmentStatus.java
+23 lines
+package com.releasepilot.application.queries;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.PromotionStatus;
+import com.releasepilot.domain.promotion.Version;
+
+import java.util.List;
+
+/**
+ * Read model backing {@code GET /applications/:id/status} (SPECS §7). Always carries one entry
+ * per pipeline stage (§3.1) — an environment the application has never had a promotion target
+ * gets a {@link EnvironmentStatus} with every field {@code null} rather than being omitted, so
+ * callers can render the full pipeline without special-casing missing stages.
+ */
+public record ApplicationEnvironmentStatus(ApplicationId applicationId, List<EnvironmentStatus> environments) {
+
+	public record EnvironmentStatus(
+			Environment environment, Version currentVersion, PromotionStatus status, PromotionId lastPromotionId) {
+	}
+}
+Write PromotionHistoryPage.java
+26 lines
+package com.releasepilot.application.queries;
+
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.PromotionStatus;
+import com.releasepilot.domain.promotion.Version;
+
+import java.time.Instant;
+import java.util.List;
+
+/**
+ * Paged read model backing {@code GET /applications/:id/promotions} (SPECS §7).
+ */
+public record PromotionHistoryPage(List<PromotionHistoryItem> items, int page, int pageSize, long total) {
+
+	public record PromotionHistoryItem(
+			PromotionId id,
+			Version version,
+			Environment fromEnvironment,
+			Environment targetEnvironment,
+			PromotionStatus status,
+			Instant requestedAt,
+			Instant completedAt) {
+	}
+}
+Write PromotionReadModelPort.java
+22 lines
+package com.releasepilot.application.queries;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.PromotionId;
+
+import java.util.Optional;
+
+/**
+ * Output port: read-only access to the denormalized projections populated by the read-model
+ * projector consumer (SPECS §8), never the write-side {@code promotions} table. Kept separate
+ * from {@code PromotionRepositoryPort} (the write side's persistence port) so the two paths of
+ * CQRS stay decoupled all the way down to persistence.
+ */
+public interface PromotionReadModelPort {
+
+	Optional<PromotionDetail> findPromotionDetail(PromotionId promotionId);
+
+	ApplicationEnvironmentStatus findApplicationEnvironmentStatus(ApplicationId applicationId);
+
+	PromotionHistoryPage findApplicationPromotions(ApplicationId applicationId, int page, int pageSize);
+}
+Write PromotionQueryPort.java
+21 lines
+package com.releasepilot.application.queries;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.PromotionId;
+
+import java.util.Optional;
+
+/**
+ * Input port: the seam through which driving adapters (HTTP controllers) reach the read side.
+ * One method per query in the spec (§7); each queries a denormalized read-model projection
+ * directly and never touches the {@code Promotion} aggregate or its write-side repository.
+ */
+public interface PromotionQueryPort {
+
+	Optional<PromotionDetail> getPromotionDetail(PromotionId promotionId);
+
+	ApplicationEnvironmentStatus getApplicationStatus(ApplicationId applicationId);
+
+	PromotionHistoryPage getApplicationPromotions(ApplicationId applicationId, int page, int pageSize);
+}
+Write PromotionQueryService.java
+48 lines
+package com.releasepilot.application.queries;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.PromotionId;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Optional;
+
+/**
+ * Implementation of {@link PromotionQueryPort}. Each method is a thin pass-through to
+ * {@link PromotionReadModelPort} — per CQRS (SPECS §2), the read side has no business logic of
+ * its own to apply; the shape returned here already is the read model.
+ */
+@Service
+public class PromotionQueryService implements PromotionQueryPort {
+
+	private final PromotionReadModelPort readModel;
+
+	public PromotionQueryService(PromotionReadModelPort readModel) {
+		this.readModel = readModel;
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Optional<PromotionDetail> getPromotionDetail(PromotionId promotionId) {
+		return readModel.findPromotionDetail(promotionId);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public ApplicationEnvironmentStatus getApplicationStatus(ApplicationId applicationId) {
+		return readModel.findApplicationEnvironmentStatus(applicationId);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public PromotionHistoryPage getApplicationPromotions(ApplicationId applicationId, int page, int pageSize) {
+		if (page < 0) {
+			throw new IllegalArgumentException("page must not be negative");
+		}
+		if (pageSize < 1) {
+			throw new IllegalArgumentException("pageSize must be at least 1");
+		}
+		return readModel.findApplicationPromotions(applicationId, page, pageSize);
+	}
+}
+Now the read-model migration and JDBC repository.
+
+Write V3__create_read_model_tables.sql
+51 lines
+-- Read-model tables for the query side (SPECS §7). Populated by the read-model projector
+-- consumer as it consumes events off the queue (SPECS §8) — never written to by command
+-- handlers, and never joined against the write-side `promotions` table.
+
+CREATE TABLE promotion_detail (
+    id                    UUID PRIMARY KEY,
+    application_id        UUID NOT NULL,
+    version               VARCHAR(255) NOT NULL,
+    from_environment       VARCHAR(20),
+    target_environment     VARCHAR(20) NOT NULL,
+    status                VARCHAR(20) NOT NULL,
+    requested_by_user_id   VARCHAR(255) NOT NULL,
+    approved_by_user_id    VARCHAR(255)
+);
+
+-- One row per event consumed for a promotion, appended by the projector rather than recomputed
+-- on read; backs the `history` array embedded in GET /promotions/:id.
+CREATE TABLE promotion_detail_history (
+    id             BIGSERIAL PRIMARY KEY,
+    promotion_id   UUID NOT NULL REFERENCES promotion_detail (id),
+    status         VARCHAR(20) NOT NULL,
+    actor_user_id  VARCHAR(255) NOT NULL,
+    occurred_at    TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_promotion_detail_history_promotion ON promotion_detail_history (promotion_id, occurred_at);
+
+-- One row per (application, environment); backs GET /applications/:id/status.
+CREATE TABLE application_environment_status (
+    application_id     UUID NOT NULL,
+    environment         VARCHAR(20) NOT NULL,
+    current_version     VARCHAR(255),
+    status              VARCHAR(20),
+    last_promotion_id   UUID,
+    PRIMARY KEY (application_id, environment)
+);
+
+-- One row per promotion; backs the paged GET /applications/:id/promotions.
+CREATE TABLE promotion_history (
+    id                   UUID PRIMARY KEY,
+    application_id       UUID NOT NULL,
+    version              VARCHAR(255) NOT NULL,
+    from_environment      VARCHAR(20),
+    target_environment    VARCHAR(20) NOT NULL,
+    status               VARCHAR(20) NOT NULL,
+    requested_at          TIMESTAMPTZ NOT NULL,
+    completed_at          TIMESTAMPTZ
+);
+
+CREATE INDEX idx_promotion_history_application ON promotion_history (application_id, requested_at DESC);
+Write JdbcPromotionReadModelRepository.java
+164 lines
+package com.releasepilot.infrastructure.persistence.readmodel;
+
+import com.releasepilot.application.queries.ApplicationEnvironmentStatus;
+import com.releasepilot.application.queries.ApplicationEnvironmentStatus.EnvironmentStatus;
+import com.releasepilot.application.queries.PromotionDetail;
+import com.releasepilot.application.queries.PromotionDetail.PromotionHistoryEntry;
+import com.releasepilot.application.queries.PromotionHistoryPage;
+import com.releasepilot.application.queries.PromotionHistoryPage.PromotionHistoryItem;
+import com.releasepilot.application.queries.PromotionReadModelPort;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.PromotionStatus;
+import com.releasepilot.domain.promotion.Version;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.stereotype.Repository;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+/**
+ * JDBC implementation of {@link PromotionReadModelPort}, backed by the {@code promotion_detail},
+ * {@code promotion_detail_history}, {@code application_environment_status} and
+ * {@code promotion_history} tables (see {@code db/migration/V3__create_read_model_tables.sql}).
+ * These tables are populated by the read-model projector consumer (SPECS §8) — a future
+ * addition — so until that consumer exists, every query here legitimately returns "not found" /
+ * empty results against a fresh database; that is a data-population gap, not a bug in this
+ * adapter, which is exercised directly against seeded rows by its integration test.
+ */
+@Repository
+public class JdbcPromotionReadModelRepository implements PromotionReadModelPort {
+
+	private static final RowMapper<PromotionDetail> DETAIL_ROW_MAPPER =
+			JdbcPromotionReadModelRepository::mapDetailRow;
+	private static final RowMapper<PromotionHistoryEntry> HISTORY_ENTRY_ROW_MAPPER =
+			JdbcPromotionReadModelRepository::mapHistoryEntryRow;
+	private static final RowMapper<EnvironmentStatus> ENVIRONMENT_STATUS_ROW_MAPPER =
+			JdbcPromotionReadModelRepository::mapEnvironmentStatusRow;
+	private static final RowMapper<PromotionHistoryItem> HISTORY_ITEM_ROW_MAPPER =
+			JdbcPromotionReadModelRepository::mapHistoryItemRow;
+
+	private final JdbcTemplate jdbcTemplate;
+
+	public JdbcPromotionReadModelRepository(JdbcTemplate jdbcTemplate) {
+		this.jdbcTemplate = jdbcTemplate;
+	}
+
+	@Override
+	public Optional<PromotionDetail> findPromotionDetail(PromotionId promotionId) {
+		Optional<PromotionDetail> detail = jdbcTemplate.query(
+						"SELECT * FROM promotion_detail WHERE id = ?", DETAIL_ROW_MAPPER, promotionId.value())
+				.stream()
+				.findFirst();
+		if (detail.isEmpty()) {
+			return Optional.empty();
+		}
+
+		List<PromotionHistoryEntry> history = jdbcTemplate.query(
+				"""
+				SELECT status, actor_user_id, occurred_at FROM promotion_detail_history
+				WHERE promotion_id = ? ORDER BY occurred_at
+				""",
+				HISTORY_ENTRY_ROW_MAPPER,
+				promotionId.value());
+
+		return detail.map(d -> new PromotionDetail(
+				d.id(), d.applicationId(), d.version(), d.fromEnvironment(), d.targetEnvironment(), d.status(),
+				d.requestedBy(), d.approvedBy(), history));
+	}
+
+	@Override
+	public ApplicationEnvironmentStatus findApplicationEnvironmentStatus(ApplicationId applicationId) {
+		Map<Environment, EnvironmentStatus> byEnvironment = jdbcTemplate.query(
+						"""
+						SELECT environment, current_version, status, last_promotion_id
+						FROM application_environment_status WHERE application_id = ?
+						""",
+						ENVIRONMENT_STATUS_ROW_MAPPER,
+						applicationId.value())
+				.stream()
+				.collect(Collectors.toMap(EnvironmentStatus::environment, status -> status));
+
+		List<EnvironmentStatus> environments = Arrays.stream(Environment.values())
+				.map(env -> byEnvironment.getOrDefault(env, new EnvironmentStatus(env, null, null, null)))
+				.toList();
+
+		return new ApplicationEnvironmentStatus(applicationId, environments);
+	}
+
+	@Override
+	public PromotionHistoryPage findApplicationPromotions(ApplicationId applicationId, int page, int pageSize) {
+		long total = jdbcTemplate.queryForObject(
+				"SELECT count(*) FROM promotion_history WHERE application_id = ?", Long.class,
+				applicationId.value());
+
+		List<PromotionHistoryItem> items = jdbcTemplate.query(
+				"""
+				SELECT * FROM promotion_history WHERE application_id = ?
+				ORDER BY requested_at DESC
+				LIMIT ? OFFSET ?
+				""",
+				HISTORY_ITEM_ROW_MAPPER,
+				applicationId.value(),
+				pageSize,
+				page * pageSize);
+
+		return new PromotionHistoryPage(items, page, pageSize, total);
+	}
+
+	private static PromotionDetail mapDetailRow(ResultSet rs, int rowNum) throws SQLException {
+		return new PromotionDetail(
+				new PromotionId(rs.getObject("id", UUID.class)),
+				new ApplicationId(rs.getObject("application_id", UUID.class)),
+				new Version(rs.getString("version")),
+				environmentOrNull(rs.getString("from_environment")),
+				Environment.valueOf(rs.getString("target_environment")),
+				PromotionStatus.valueOf(rs.getString("status")),
+				rs.getString("requested_by_user_id"),
+				rs.getString("approved_by_user_id"),
+				List.of());
+	}
+
+	private static PromotionHistoryEntry mapHistoryEntryRow(ResultSet rs, int rowNum) throws SQLException {
+		return new PromotionHistoryEntry(
+				PromotionStatus.valueOf(rs.getString("status")),
+				rs.getString("actor_user_id"),
+				rs.getTimestamp("occurred_at").toInstant());
+	}
+
+	private static EnvironmentStatus mapEnvironmentStatusRow(ResultSet rs, int rowNum) throws SQLException {
+		String currentVersion = rs.getString("current_version");
+		String status = rs.getString("status");
+		UUID lastPromotionId = rs.getObject("last_promotion_id", UUID.class);
+		return new EnvironmentStatus(
+				Environment.valueOf(rs.getString("environment")),
+				currentVersion == null ? null : new Version(currentVersion),
+				status == null ? null : PromotionStatus.valueOf(status),
+				lastPromotionId == null ? null : new PromotionId(lastPromotionId));
+	}
+
+	private static PromotionHistoryItem mapHistoryItemRow(ResultSet rs, int rowNum) throws SQLException {
+		var completedAt = rs.getTimestamp("completed_at");
+		return new PromotionHistoryItem(
+				new PromotionId(rs.getObject("id", UUID.class)),
+				new Version(rs.getString("version")),
+				environmentOrNull(rs.getString("from_environment")),
+				Environment.valueOf(rs.getString("target_environment")),
+				PromotionStatus.valueOf(rs.getString("status")),
+				rs.getTimestamp("requested_at").toInstant(),
+				completedAt == null ? null : completedAt.toInstant());
+	}
+
+	private static Environment environmentOrNull(String value) {
+		return value == null ? null : Environment.valueOf(value);
+	}
+}
+That's just a nullability warning, not an error — fine to leave. Now let's annotate the existing write-side beans and add the in-memory deployment adapter.
+
+Edit JdbcPromotionRepository.java
+Added 1 line
+Right, need to add the annotation on the class itself too.
+
+Edit JdbcPromotionRepository.java
+Removed 3 lines
+Now OutboxEventPublisher:
+
+Edit OutboxEventPublisher.java
+Added 1 line
+Edit OutboxEventPublisher.java
+Added 1 line
+Write InMemoryDeploymentAdapter.java
+41 lines
+package com.releasepilot.infrastructure.adapters.inmemory;
+
+import com.releasepilot.domain.ports.DeploymentPort;
+import com.releasepilot.domain.ports.DeploymentRef;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.Version;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * In-memory stub adapter for {@link DeploymentPort} (SPECS §6). Returns a fake, incrementing
+ * {@link DeploymentRef} and records every call so tests can assert on what was triggered — there
+ * is no outbound HTTP in this exercise; a real CI/CD client would implement the same port.
+ */
+@Component
+public class InMemoryDeploymentAdapter implements DeploymentPort {
+
+	private final AtomicLong sequence = new AtomicLong();
+	private final List<TriggeredDeployment> triggeredDeployments = new CopyOnWriteArrayList<>();
+
+	@Override
+	public DeploymentRef trigger(ApplicationId applicationId, Version version, Environment environment) {
+		DeploymentRef ref = new DeploymentRef("deploy-" + sequence.incrementAndGet());
+		triggeredDeployments.add(new TriggeredDeployment(applicationId, version, environment, ref));
+		return ref;
+	}
+
+	/** The deployments triggered so far, oldest first — for test assertions. */
+	public List<TriggeredDeployment> triggeredDeployments() {
+		return List.copyOf(triggeredDeployments);
+	}
+
+	public record TriggeredDeployment(
+			ApplicationId applicationId, Version version, Environment environment, DeploymentRef deploymentRef) {
+	}
+}
+Bash
+IN
+rm -f /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/application/queries/.gitkeep \
+      /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/adapters/inmemory/.gitkeep \
+      /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/persistence/readmodel/.gitkeep
+ls /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/controllers/
+
+OUT
+(Bash completed with no output)
+api/controllers still just has .gitkeep — I'll remove that once I add controllers there. Let's compile now to check the query layer so far.
+
+Bash
+IN
+./mvnw -q -o compile 2>&1 | tail -100
+
+OUT
+(Bash completed with no output)
+Clean. Now the API layer: DTOs, controllers, and error mapping.
+
+Update Todos
+
+Add optional reason to Promotion.rollback/cancel + command port/service overloads
+
+Move PromotionNotFoundException to shared application package
+
+Build query application layer (DTOs, PromotionQueryPort/Service, PromotionReadModelPort)
+
+Add read-model Flyway migration + JdbcPromotionReadModelRepository
+
+Add InMemoryDeploymentAdapter and wire Spring beans (@Repository/@Component/@Service)
+
+Build API layer: DTOs, PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Update/add tests (domain, command service, query service, read-model IT, web layer)
+
+Run full build/test suite and fix issues
+Write ActorRequest.java
+27 lines
+package com.releasepilot.api.dto.commands;
+
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.Role;
+
+/**
+ * Wire shape for the trusted {@code { userId, role }} actor concept (SPECS §15) carried on every
+ * write request. Translated to the domain's {@link Actor} value object right here at the API
+ * boundary — nothing past the controller ever sees this class.
+ */
+public record ActorRequest(String userId, String role) {
+
+	public Actor toActor() {
+		if (userId == null || userId.isBlank()) {
+			throw new IllegalArgumentException("userId must not be blank");
+		}
+		if (role == null || role.isBlank()) {
+			throw new IllegalArgumentException("role must not be blank");
+		}
+		try {
+			return new Actor(userId, Role.valueOf(role.toUpperCase()));
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("Unknown role '%s'".formatted(role), e);
+		}
+	}
+}
+Write RequestPromotionRequest.java
+40 lines
+package com.releasepilot.api.dto.commands;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.Version;
+
+/** Request body for {@code POST /promotions} (SPECS §10 → {@code RequestPromotion}, §4). */
+public record RequestPromotionRequest(
+		String applicationId, String version, String targetEnvironment, ActorRequest requestedBy) {
+
+	public ApplicationId applicationIdValue() {
+		if (applicationId == null || applicationId.isBlank()) {
+			throw new IllegalArgumentException("applicationId must not be blank");
+		}
+		return ApplicationId.of(applicationId);
+	}
+
+	public Version versionValue() {
+		return new Version(version);
+	}
+
+	public Environment targetEnvironmentValue() {
+		if (targetEnvironment == null || targetEnvironment.isBlank()) {
+			throw new IllegalArgumentException("targetEnvironment must not be blank");
+		}
+		try {
+			return Environment.valueOf(targetEnvironment.toUpperCase());
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("Unknown targetEnvironment '%s'".formatted(targetEnvironment), e);
+		}
+	}
+
+	public com.releasepilot.domain.promotion.Actor requestedByActor() {
+		if (requestedBy == null) {
+			throw new IllegalArgumentException("requestedBy must not be null");
+		}
+		return requestedBy.toActor();
+	}
+}
+Edit RequestPromotionRequest.java
+Added 1 line
+Edit RequestPromotionRequest.java
+Modified
+Now the smaller per-action request DTOs and the response DTO:
+
+Write ApprovePromotionRequest.java
+15 lines
+package com.releasepilot.api.dto.commands;
+
+import com.releasepilot.domain.promotion.Actor;
+
+/** Request body for {@code POST /promotions/:id/approve} (SPECS §10 → {@code ApprovePromotion}). */
+public record ApprovePromotionRequest(ActorRequest approvedBy) {
+
+	public Actor approvedByActor() {
+		if (approvedBy == null) {
+			throw new IllegalArgumentException("approvedBy must not be null");
+		}
+		return approvedBy.toActor();
+	}
+}
+Write StartDeploymentRequest.java
+15 lines
+package com.releasepilot.api.dto.commands;
+
+import com.releasepilot.domain.promotion.Actor;
+
+/** Request body for {@code POST /promotions/:id/start} (SPECS §10 → {@code StartDeployment}). */
+public record StartDeploymentRequest(ActorRequest startedBy) {
+
+	public Actor startedByActor() {
+		if (startedBy == null) {
+			throw new IllegalArgumentException("startedBy must not be null");
+		}
+		return startedBy.toActor();
+	}
+}
+Write CompletePromotionRequest.java
+15 lines
+package com.releasepilot.api.dto.commands;
+
+import com.releasepilot.domain.promotion.Actor;
+
+/** Request body for {@code POST /promotions/:id/complete} (SPECS §10 → {@code CompletePromotion}). */
+public record CompletePromotionRequest(ActorRequest completedBy) {
+
+	public Actor completedByActor() {
+		if (completedBy == null) {
+			throw new IllegalArgumentException("completedBy must not be null");
+		}
+		return completedBy.toActor();
+	}
+}
+Write RollbackPromotionRequest.java
+15 lines
+package com.releasepilot.api.dto.commands;
+
+import com.releasepilot.domain.promotion.Actor;
+
+/** Request body for {@code POST /promotions/:id/rollback} (SPECS §10 → {@code RollbackPromotion}). */
+public record RollbackPromotionRequest(ActorRequest rolledBackBy, String reason) {
+
+	public Actor rolledBackByActor() {
+		if (rolledBackBy == null) {
+			throw new IllegalArgumentException("rolledBackBy must not be null");
+		}
+		return rolledBackBy.toActor();
+	}
+}
+Write CancelPromotionRequest.java
+15 lines
+package com.releasepilot.api.dto.commands;
+
+import com.releasepilot.domain.promotion.Actor;
+
+/** Request body for {@code POST /promotions/:id/cancel} (SPECS §10 → {@code CancelPromotion}). */
+public record CancelPromotionRequest(ActorRequest cancelledBy, String reason) {
+
+	public Actor cancelledByActor() {
+		if (cancelledBy == null) {
+			throw new IllegalArgumentException("cancelledBy must not be null");
+		}
+		return cancelledBy.toActor();
+	}
+}
+Write PromotionIdResponse.java
+14 lines
+package com.releasepilot.api.dto.commands;
+
+import com.releasepilot.domain.promotion.PromotionId;
+
+import java.util.UUID;
+
+/** Response body shared by every command endpoint (SPECS §10). */
+public record PromotionIdResponse(UUID id) {
+
+	public static PromotionIdResponse from(PromotionId promotionId) {
+		return new PromotionIdResponse(promotionId.value());
+	}
+}
+Now the command controller:
+
+Write PromotionCommandController.java
+76 lines
+package com.releasepilot.api.controllers;
+
+import com.releasepilot.api.dto.commands.ApprovePromotionRequest;
+import com.releasepilot.api.dto.commands.CancelPromotionRequest;
+import com.releasepilot.api.dto.commands.CompletePromotionRequest;
+import com.releasepilot.api.dto.commands.PromotionIdResponse;
+import com.releasepilot.api.dto.commands.RequestPromotionRequest;
+import com.releasepilot.api.dto.commands.RollbackPromotionRequest;
+import com.releasepilot.api.dto.commands.StartDeploymentRequest;
+import com.releasepilot.application.commands.PromotionCommandPort;
+import com.releasepilot.domain.promotion.PromotionId;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.net.URI;
+
+/**
+ * Thin HTTP boundary for the write side (SPECS §10): parses the request, builds the arguments a
+ * {@link PromotionCommandPort} method needs, and delegates — no business logic lives here. Every
+ * business-rule violation raised by the aggregate propagates as a {@link
+ * com.releasepilot.domain.promotion.errors.DomainError} and is translated to a 4xx response by
+ * {@link com.releasepilot.api.ErrorMapping}, never handled inline in this class.
+ */
+@RestController
+@RequestMapping("/promotions")
+public class PromotionCommandController {
+
+	private final PromotionCommandPort commandPort;
+
+	public PromotionCommandController(PromotionCommandPort commandPort) {
+		this.commandPort = commandPort;
+	}
+
+	@PostMapping
+	public ResponseEntity<PromotionIdResponse> requestPromotion(@RequestBody RequestPromotionRequest request) {
+		PromotionId id = commandPort.requestPromotion(
+				request.applicationIdValue(), request.versionValue(), request.targetEnvironmentValue(),
+				request.requestedByActor());
+		return ResponseEntity.created(URI.create("/promotions/" + id.value())).body(PromotionIdResponse.from(id));
+	}
+
+	@PostMapping("/{id}/approve")
+	public PromotionIdResponse approve(@PathVariable String id, @RequestBody ApprovePromotionRequest request) {
+		return PromotionIdResponse.from(
+				commandPort.approvePromotion(PromotionId.of(id), request.approvedByActor()));
+	}
+
+	@PostMapping("/{id}/start")
+	public PromotionIdResponse start(@PathVariable String id, @RequestBody StartDeploymentRequest request) {
+		return PromotionIdResponse.from(
+				commandPort.startDeployment(PromotionId.of(id), request.startedByActor()));
+	}
+
+	@PostMapping("/{id}/complete")
+	public PromotionIdResponse complete(@PathVariable String id, @RequestBody CompletePromotionRequest request) {
+		return PromotionIdResponse.from(
+				commandPort.completePromotion(PromotionId.of(id), request.completedByActor()));
+	}
+
+	@PostMapping("/{id}/rollback")
+	public PromotionIdResponse rollback(@PathVariable String id, @RequestBody RollbackPromotionRequest request) {
+		return PromotionIdResponse.from(
+				commandPort.rollbackPromotion(PromotionId.of(id), request.rolledBackByActor(), request.reason()));
+	}
+
+	@PostMapping("/{id}/cancel")
+	public PromotionIdResponse cancel(@PathVariable String id, @RequestBody CancelPromotionRequest request) {
+		return PromotionIdResponse.from(
+				commandPort.cancelPromotion(PromotionId.of(id), request.cancelledByActor(), request.reason()));
+	}
+}
+Bash
+IN
+./mvnw -q -o compile 2>&1 | tail -100
+
+OUT
+(Bash completed with no output)
+Good — compiles fine; that was just IDE index lag. Now the query response DTOs and query controller.
+
+Write PromotionDetailResponse.java
+41 lines
+package com.releasepilot.api.dto.queries;
+
+import com.releasepilot.application.queries.PromotionDetail;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+/** Response body for {@code GET /promotions/:id} (SPECS §7), flattening domain value objects to JSON primitives. */
+public record PromotionDetailResponse(
+		UUID id,
+		UUID applicationId,
+		String version,
+		String fromEnvironment,
+		String targetEnvironment,
+		String status,
+		String requestedBy,
+		String approvedBy,
+		List<HistoryEntry> history) {
+
+	public static PromotionDetailResponse from(PromotionDetail detail) {
+		return new PromotionDetailResponse(
+				detail.id().value(),
+				detail.applicationId().value(),
+				detail.version().value(),
+				detail.fromEnvironment() == null ? null : detail.fromEnvironment().name(),
+				detail.targetEnvironment().name(),
+				detail.status().name(),
+				detail.requestedBy(),
+				detail.approvedBy(),
+				detail.history().stream().map(HistoryEntry::from).toList());
+	}
+
+	public record HistoryEntry(String status, String actor, Instant occurredAt) {
+
+		static HistoryEntry from(PromotionDetail.PromotionHistoryEntry entry) {
+			return new HistoryEntry(entry.status().name(), entry.actor(), entry.occurredAt());
+		}
+	}
+}
+Write ApplicationStatusResponse.java
+27 lines
+package com.releasepilot.api.dto.queries;
+
+import com.releasepilot.application.queries.ApplicationEnvironmentStatus;
+
+import java.util.List;
+import java.util.UUID;
+
+/** Response body for {@code GET /applications/:id/status} (SPECS §7). */
+public record ApplicationStatusResponse(UUID applicationId, List<EnvironmentEntry> environments) {
+
+	public static ApplicationStatusResponse from(ApplicationEnvironmentStatus status) {
+		return new ApplicationStatusResponse(
+				status.applicationId().value(), status.environments().stream().map(EnvironmentEntry::from).toList());
+	}
+
+	public record EnvironmentEntry(String environment, String currentVersion, String status, UUID lastPromotionId) {
+
+		static EnvironmentEntry from(ApplicationEnvironmentStatus.EnvironmentStatus entry) {
+			return new EnvironmentEntry(
+					entry.environment().name(),
+					entry.currentVersion() == null ? null : entry.currentVersion().value(),
+					entry.status() == null ? null : entry.status().name(),
+					entry.lastPromotionId() == null ? null : entry.lastPromotionId().value());
+		}
+	}
+}
+Write PromotionHistoryResponse.java
+38 lines
+package com.releasepilot.api.dto.queries;
+
+import com.releasepilot.application.queries.PromotionHistoryPage;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+/** Response body for {@code GET /applications/:id/promotions} (SPECS §7). */
+public record PromotionHistoryResponse(List<Item> items, int page, int pageSize, long total) {
+
+	public static PromotionHistoryResponse from(PromotionHistoryPage page) {
+		return new PromotionHistoryResponse(
+				page.items().stream().map(Item::from).toList(), page.page(), page.pageSize(), page.total());
+	}
+
+	public record Item(
+			UUID id,
+			String version,
+			String fromEnvironment,
+			String targetEnvironment,
+			String status,
+			Instant requestedAt,
+			Instant completedAt) {
+
+		static Item from(PromotionHistoryPage.PromotionHistoryItem item) {
+			return new Item(
+					item.id().value(),
+					item.version().value(),
+					item.fromEnvironment() == null ? null : item.fromEnvironment().name(),
+					item.targetEnvironment().name(),
+					item.status().name(),
+					item.requestedAt(),
+					item.completedAt());
+		}
+	}
+}
+Now the query controller:
+
+Write PromotionQueryController.java
+50 lines
+package com.releasepilot.api.controllers;
+
+import com.releasepilot.api.dto.queries.ApplicationStatusResponse;
+import com.releasepilot.api.dto.queries.PromotionDetailResponse;
+import com.releasepilot.api.dto.queries.PromotionHistoryResponse;
+import com.releasepilot.application.PromotionNotFoundException;
+import com.releasepilot.application.queries.PromotionQueryPort;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.PromotionId;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * Thin HTTP boundary for the read side (SPECS §7/§10): delegates straight to {@link
+ * PromotionQueryPort} and flattens the result into a JSON-shaped response — no query logic lives
+ * here, and this class never touches the write-side aggregate or its repository.
+ */
+@RestController
+public class PromotionQueryController {
+
+	private final PromotionQueryPort queryPort;
+
+	public PromotionQueryController(PromotionQueryPort queryPort) {
+		this.queryPort = queryPort;
+	}
+
+	@GetMapping("/promotions/{id}")
+	public PromotionDetailResponse getPromotionDetail(@PathVariable String id) {
+		PromotionId promotionId = PromotionId.of(id);
+		return queryPort.getPromotionDetail(promotionId)
+				.map(PromotionDetailResponse::from)
+				.orElseThrow(() -> new PromotionNotFoundException(promotionId));
+	}
+
+	@GetMapping("/applications/{id}/status")
+	public ApplicationStatusResponse getApplicationStatus(@PathVariable String id) {
+		return ApplicationStatusResponse.from(queryPort.getApplicationStatus(ApplicationId.of(id)));
+	}
+
+	@GetMapping("/applications/{id}/promotions")
+	public PromotionHistoryResponse getApplicationPromotions(
+			@PathVariable String id,
+			@RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "20") int pageSize) {
+		return PromotionHistoryResponse.from(queryPort.getApplicationPromotions(ApplicationId.of(id), page, pageSize));
+	}
+}
+Now the ErrorMapping (§10/§12):
+
+Write ErrorMapping.java
+54 lines
+package com.releasepilot.api;
+
+import com.releasepilot.application.PromotionNotFoundException;
+import com.releasepilot.domain.promotion.errors.DomainError;
+import com.releasepilot.domain.promotion.errors.DuplicatePromotionInProgressError;
+import com.releasepilot.domain.promotion.errors.EnvironmentSkippedError;
+import com.releasepilot.domain.promotion.errors.InvalidTransitionError;
+import com.releasepilot.domain.promotion.errors.PromotionAlreadyTerminalError;
+import com.releasepilot.domain.promotion.errors.UnauthorizedApproverError;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+/**
+ * Maps every documented business-rule violation (SPECS §3.2/§10) and the two application-layer
+ * "not found"/"bad input" cases to an explicit 4xx status — a domain-error violation never falls
+ * through to an uncaught exception (never 500). The switch over the sealed {@link DomainError}
+ * hierarchy is exhaustive at compile time: adding a new {@code DomainError} subtype without
+ * updating this mapping fails the build, not a request at runtime.
+ */
+@RestControllerAdvice
+public class ErrorMapping {
+
+	@ExceptionHandler(DomainError.class)
+	public ResponseEntity<ErrorResponse> handleDomainError(DomainError error) {
+		HttpStatus status = switch (error) {
+			case EnvironmentSkippedError e -> HttpStatus.UNPROCESSABLE_ENTITY;
+			case UnauthorizedApproverError e -> HttpStatus.FORBIDDEN;
+			case InvalidTransitionError e -> HttpStatus.CONFLICT;
+			case PromotionAlreadyTerminalError e -> HttpStatus.CONFLICT;
+			case DuplicatePromotionInProgressError e -> HttpStatus.CONFLICT;
+		};
+		return responseOf(status, error.getMessage());
+	}
+
+	@ExceptionHandler(PromotionNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handleNotFound(PromotionNotFoundException error) {
+		return responseOf(HttpStatus.NOT_FOUND, error.getMessage());
+	}
+
+	@ExceptionHandler(IllegalArgumentException.class)
+	public ResponseEntity<ErrorResponse> handleBadRequest(IllegalArgumentException error) {
+		return responseOf(HttpStatus.BAD_REQUEST, error.getMessage());
+	}
+
+	private static ResponseEntity<ErrorResponse> responseOf(HttpStatus status, String message) {
+		return ResponseEntity.status(status).body(new ErrorResponse(status.getReasonPhrase(), message));
+	}
+
+	public record ErrorResponse(String error, String message) {
+	}
+}
+Bash
+IN
+find ~/.m2 -iname "spring-web-*.jar" 2>/dev/null | head -1
+
+OUT
+/home/juanjo/.m2/repository/org/springframework/spring-web/6.0.11/spring-web-6.0.11.jar
+Bash
+IN
+find ~/.m2 -iname "spring-web-*.jar" 2>/dev/null; echo "---"; find ~/.m2 -path "*org/springframework/http/HttpStatus.class" 2>/dev/null; ./mvnw -q -o dependency:tree 2>&1 | grep -i "spring-web\b\|spring-webmvc\|spring-framework" 
+
+OUT
+/home/juanjo/.m2/repository/org/springframework/spring-web/6.0.11/spring-web-6.0.11.jar
+/home/juanjo/.m2/repository/org/springframework/spring-web/7.0.8/spring-web-7.0.8.jar
+---
+Bash
+IN
+cd /tmp && unzip -p ~/.m2/repository/org/springframework/spring-web/7.0.8/spring-web-7.0.8.jar org/springframework/http/HttpStatus.class > HttpStatus.class 2>/dev/null && javap -p HttpStatus.class | grep -i "UNPROCESSABLE\|422\|UNPROCESSABLE_CONTENT"
+
+OUT
+  public static final org.springframework.http.HttpStatus UNPROCESSABLE_CONTENT;
+  public static final org.springframework.http.HttpStatus UNPROCESSABLE_ENTITY;
+Shell cwd was reset to /home/juanjo/git/agile-monkeys-test
+UNPROCESSABLE_ENTITY was renamed to UNPROCESSABLE_CONTENT per RFC 9110. Let me use the non-deprecated one.
+
+Edit ErrorMapping.java
+Modified
+Now let's clean up the leftover .gitkeep in api/controllers and compile everything.
+
+Bash
+IN
+rm -f /home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/api/controllers/.gitkeep
+./mvnw -q -o compile 2>&1 | tail -150
+
+OUT
+(Bash completed with no output)
+Compiles cleanly. Now let's try booting the full Spring context to make sure all the new beans wire together correctly.
+
+Bash
+IN
+./mvnw -q -o test -Dtest=ReleasePilotApplicationTests 2>&1 | tail -150
+
+OUT
+	at org.springframework.beans.factory.support.ConstructorResolver.autowireConstructor(ConstructorResolver.java:240) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.autowireConstructor(AbstractAutowireCapableBeanFactory.java:1380) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBeanInstance(AbstractAutowireCapableBeanFactory.java:1219) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:565) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:331) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:201) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.config.DependencyDescriptor.resolveCandidate(DependencyDescriptor.java:229) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1769) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1658) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:912) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:791) ~[spring-beans-7.0.8.jar:7.0.8]
+	... 112 common frames omitted
+Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'jdbcPromotionRepository' defined in file [/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/infrastructure/persistence/JdbcPromotionRepository.class]: Unsatisfied dependency expressed through constructor parameter 0: No qualifying bean of type 'org.springframework.jdbc.core.JdbcTemplate' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:804) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.ConstructorResolver.autowireConstructor(ConstructorResolver.java:240) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.autowireConstructor(AbstractAutowireCapableBeanFactory.java:1380) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBeanInstance(AbstractAutowireCapableBeanFactory.java:1219) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:565) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:331) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:201) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.config.DependencyDescriptor.resolveCandidate(DependencyDescriptor.java:229) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1769) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1658) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:912) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:791) ~[spring-beans-7.0.8.jar:7.0.8]
+	... 126 common frames omitted
+Caused by: org.springframework.beans.factory.NoSuchBeanDefinitionException: No qualifying bean of type 'org.springframework.jdbc.core.JdbcTemplate' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.raiseNoMatchingBeanFound(DefaultListableBeanFactory.java:2304) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1732) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1658) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:912) ~[spring-beans-7.0.8.jar:7.0.8]
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:791) ~[spring-beans-7.0.8.jar:7.0.8]
+	... 140 common frames omitted
+
+[ERROR] Tests run: 1, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 0.576 s <<< FAILURE! -- in com.releasepilot.ReleasePilotApplicationTests
+[ERROR] com.releasepilot.ReleasePilotApplicationTests.contextLoads -- Time elapsed: 0.004 s <<< ERROR!
+java.lang.IllegalStateException: Failed to load ApplicationContext for [WebMergedContextConfiguration@19c1820d testClass = com.releasepilot.ReleasePilotApplicationTests, locations = [], classes = [com.releasepilot.ReleasePilotApplication], contextInitializerClasses = [], activeProfiles = [], propertySourceDescriptors = [], propertySourceProperties = ["org.springframework.boot.test.context.SpringBootTestContextBootstrapper=true"], contextCustomizers = [org.springframework.boot.test.context.PropertyMappingContextCustomizer@0, org.springframework.boot.test.context.filter.ExcludeFilterContextCustomizer@350ec41e, org.springframework.boot.test.json.DuplicateJsonObjectContextCustomizerFactory$DuplicateJsonObjectContextCustomizer@28d6290, org.springframework.boot.test.autoconfigure.OnFailureConditionReportContextCustomizerFactory$OnFailureConditionReportContextCustomizer@38f57b3d, org.springframework.test.context.support.DynamicPropertiesContextCustomizer@0, org.springframework.boot.webmvc.test.autoconfigure.WebDriverContextCustomizer@39dcf4b0, org.springframework.boot.web.server.context.SpringBootTestRandomPortContextCustomizer@46f699d5, org.springframework.boot.test.context.SpringBootTestAnnotation@a48401cf], resourceBasePath = "src/main/webapp", contextLoader = org.springframework.boot.test.context.SpringBootContextLoader, parent = null]
+	at org.springframework.test.context.cache.DefaultCacheAwareContextLoaderDelegate.lambda$loadContext$0(DefaultCacheAwareContextLoaderDelegate.java:195)
+	at org.springframework.test.context.cache.DefaultContextCache.put(DefaultContextCache.java:214)
+	at org.springframework.test.context.cache.DefaultCacheAwareContextLoaderDelegate.loadContext(DefaultCacheAwareContextLoaderDelegate.java:160)
+	at org.springframework.test.context.support.DefaultTestContext.getApplicationContext(DefaultTestContext.java:128)
+	at org.springframework.test.context.web.ServletTestExecutionListener.setUpRequestContextIfNecessary(ServletTestExecutionListener.java:200)
+	at org.springframework.test.context.web.ServletTestExecutionListener.prepareTestInstance(ServletTestExecutionListener.java:139)
+	at org.springframework.test.context.TestContextManager.prepareTestInstance(TestContextManager.java:260)
+	at org.springframework.test.context.junit.jupiter.SpringExtension.postProcessTestInstance(SpringExtension.java:242)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.accept(ForEachOps.java:184)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.stream.ReferencePipeline$2$1.accept(ReferencePipeline.java:179)
+	at java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)
+	at java.base/java.util.ArrayList$ArrayListSpliterator.forEachRemaining(ArrayList.java:1708)
+	at java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:509)
+	at java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:499)
+	at java.base/java.util.stream.ForEachOps$ForEachOp.evaluateSequential(ForEachOps.java:151)
+	at java.base/java.util.stream.ForEachOps$ForEachOp$OfRef.evaluateSequential(ForEachOps.java:174)
+	at java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:234)
+	at java.base/java.util.stream.ReferencePipeline.forEach(ReferencePipeline.java:596)
+	at java.base/java.util.Optional.orElseGet(Optional.java:364)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'promotionCommandController' defined in file [/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/api/controllers/PromotionCommandController.class]: Unsatisfied dependency expressed through constructor parameter 0: Error creating bean with name 'promotionCommandService' defined in file [/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/application/commands/PromotionCommandService.class]: Unsatisfied dependency expressed through constructor parameter 1: Error creating bean with name 'jdbcPromotionRepository' defined in file [/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/infrastructure/persistence/JdbcPromotionRepository.class]: Unsatisfied dependency expressed through constructor parameter 0: No qualifying bean of type 'org.springframework.jdbc.core.JdbcTemplate' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:804)
+	at org.springframework.beans.factory.support.ConstructorResolver.autowireConstructor(ConstructorResolver.java:240)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.autowireConstructor(AbstractAutowireCapableBeanFactory.java:1380)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBeanInstance(AbstractAutowireCapableBeanFactory.java:1219)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:565)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:331)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:196)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.instantiateSingleton(DefaultListableBeanFactory.java:1225)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingleton(DefaultListableBeanFactory.java:1191)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingletons(DefaultListableBeanFactory.java:1121)
+	at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:994)
+	at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:621)
+	at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:756)
+	at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:445)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:321)
+	at org.springframework.boot.test.context.SpringBootContextLoader.lambda$loadContext$2(SpringBootContextLoader.java:155)
+	at org.springframework.util.function.ThrowingSupplier.get(ThrowingSupplier.java:58)
+	at org.springframework.util.function.ThrowingSupplier.get(ThrowingSupplier.java:46)
+	at org.springframework.boot.SpringApplication.withHook(SpringApplication.java:1465)
+	at org.springframework.boot.test.context.SpringBootContextLoader$ContextLoaderHook.run(SpringBootContextLoader.java:600)
+	at org.springframework.boot.test.context.SpringBootContextLoader.loadContext(SpringBootContextLoader.java:155)
+	at org.springframework.boot.test.context.SpringBootContextLoader.loadContext(SpringBootContextLoader.java:114)
+	at org.springframework.test.context.cache.DefaultCacheAwareContextLoaderDelegate.loadContextInternal(DefaultCacheAwareContextLoaderDelegate.java:247)
+	at org.springframework.test.context.cache.DefaultCacheAwareContextLoaderDelegate.lambda$loadContext$0(DefaultCacheAwareContextLoaderDelegate.java:167)
+	... 21 more
+Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'promotionCommandService' defined in file [/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/application/commands/PromotionCommandService.class]: Unsatisfied dependency expressed through constructor parameter 1: Error creating bean with name 'jdbcPromotionRepository' defined in file [/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/infrastructure/persistence/JdbcPromotionRepository.class]: Unsatisfied dependency expressed through constructor parameter 0: No qualifying bean of type 'org.springframework.jdbc.core.JdbcTemplate' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:804)
+	at org.springframework.beans.factory.support.ConstructorResolver.autowireConstructor(ConstructorResolver.java:240)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.autowireConstructor(AbstractAutowireCapableBeanFactory.java:1380)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBeanInstance(AbstractAutowireCapableBeanFactory.java:1219)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:565)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:331)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:201)
+	at org.springframework.beans.factory.config.DependencyDescriptor.resolveCandidate(DependencyDescriptor.java:229)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1769)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1658)
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:912)
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:791)
+	... 47 more
+Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'jdbcPromotionRepository' defined in file [/home/juanjo/git/agile-monkeys-test/target/classes/com/releasepilot/infrastructure/persistence/JdbcPromotionRepository.class]: Unsatisfied dependency expressed through constructor parameter 0: No qualifying bean of type 'org.springframework.jdbc.core.JdbcTemplate' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:804)
+	at org.springframework.beans.factory.support.ConstructorResolver.autowireConstructor(ConstructorResolver.java:240)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.autowireConstructor(AbstractAutowireCapableBeanFactory.java:1380)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBeanInstance(AbstractAutowireCapableBeanFactory.java:1219)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:565)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:331)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:201)
+	at org.springframework.beans.factory.config.DependencyDescriptor.resolveCandidate(DependencyDescriptor.java:229)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1769)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1658)
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:912)
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:791)
+	... 61 more
+Caused by: org.springframework.beans.factory.NoSuchBeanDefinitionException: No qualifying bean of type 'org.springframework.jdbc.core.JdbcTemplate' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.raiseNoMatchingBeanFound(DefaultListableBeanFactory.java:2304)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1732)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1658)
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:912)
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:791)
+	... 75 more
+
+[ERROR] Errors: 
+[ERROR]   ReleasePilotApplicationTests.contextLoads » IllegalState Failed to load ApplicationContext for [WebMergedContextConfiguration@19c1820d testClass = com.releasepilot.ReleasePilotApplicationTests, locations = [], classes = [com.releasepilot.ReleasePilotApplication], contextInitializerClasses = [], activeProfiles = [], propertySourceDescriptors = [], propertySourceProperties = ["org.springframework.boot.test.context.SpringBootTestContextBootstrapper=true"], contextCustomizers = [org.springframework.boot.test.context.PropertyMappingContextCustomizer@0, org.springframework.boot.test.context.filter.ExcludeFilterContextCustomizer@350ec41e, org.springframework.boot.test.json.DuplicateJsonObjectContextCustomizerFactory$DuplicateJsonObjectContextCustomizer@28d6290, org.springframework.boot.test.autoconfigure.OnFailureConditionReportContextCustomizerFactory$OnFailureConditionReportContextCustomizer@38f57b3d, org.springframework.test.context.support.DynamicPropertiesContextCustomizer@0, org.springframework.boot.webmvc.test.autoconfigure.WebDriverContextCustomizer@39dcf4b0, org.springframework.boot.web.server.context.SpringBootTestRandomPortContextCustomizer@46f699d5, org.springframework.boot.test.context.SpringBootTestAnnotation@a48401cf], resourceBasePath = "src/main/webapp", contextLoader = org.springframework.boot.test.context.SpringBootContextLoader, parent = null]
+[ERROR] Tests run: 1, Failures: 0, Errors: 1, Skipped: 0
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.6:test (default-test) on project releasepilot: 
+[ERROR] 
+[ERROR] See /home/juanjo/git/agile-monkeys-test/target/surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+Bash
+IN
+git -C /home/juanjo/git/agile-monkeys-test mv src/test/java/com/releasepilot/ReleasePilotApplicationTests.java src/test/java/com/releasepilot/ReleasePilotApplicationIT.java
+
+OUT
+(Bash completed with no output)
+Write ReleasePilotApplicationIT.java
+Write failed
+package com.releasepilot;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
+
+/**
+ * Smoke-tests that the full Spring context wires together: every {@code @Repository}/{@code
+ * @Service}/{@code @Component}/{@code @RestController} bean added for the HTTP command and query
+ * layers (SPECS §10) actually satisfies its constructor dependencies, backed by a real, disposable
+ * PostgreSQL instance (via Testcontainers) so Flyway can migrate the schema those beans need.
+ *
+ * <p>Named {@code *IT} — see {@code JdbcPromotionRepositoryIT} for why only {@code mvnw verify}
+ * runs it; the plain unit-test suite (SPECS §14, {@code mvnw test}) still needs no database.
+ */
+@Testcontainers
+@SpringBootTest(properties = "spring.autoconfigure.exclude=")
+class ReleasePilotApplicationIT {
+
+	@Container
+	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
+
+	@DynamicPropertySource
+	static void datasourceProperties(DynamicPropertyRegistry registry) {
+		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+		registry.add("spring.datasource.username", POSTGRES::getUsername);
+		registry.add("spring.datasource.password", POSTGRES::getPassword);
+	}
+
+	@Test
+	void contextLoads() {
+	}
+
+}
+Read ReleasePilotApplicationIT.java
+Write ReleasePilotApplicationIT.java
+40 lines
+package com.releasepilot;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
+
+/**
+ * Smoke-tests that the full Spring context wires together: every {@code @Repository}/{@code
+ * @Service}/{@code @Component}/{@code @RestController} bean added for the HTTP command and query
+ * layers (SPECS §10) actually satisfies its constructor dependencies, backed by a real, disposable
+ * PostgreSQL instance (via Testcontainers) so Flyway can migrate the schema those beans need.
+ *
+ * <p>Named {@code *IT} — see {@code JdbcPromotionRepositoryIT} for why only {@code mvnw verify}
+ * runs it; the plain unit-test suite (SPECS §14, {@code mvnw test}) still needs no database.
+ */
+@Testcontainers
+@SpringBootTest(properties = "spring.autoconfigure.exclude=")
+class ReleasePilotApplicationIT {
+
+	@Container
+	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
+
+	@DynamicPropertySource
+	static void datasourceProperties(DynamicPropertyRegistry registry) {
+		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+		registry.add("spring.datasource.username", POSTGRES::getUsername);
+		registry.add("spring.datasource.password", POSTGRES::getPassword);
+	}
+
+	@Test
+	void contextLoads() {
+	}
+
+}
+Bash
+IN
+docker info >/dev/null 2>&1 && echo "docker available" || echo "no docker"
+
+OUT
+no docker
+Bash
+IN
+./mvnw -q -o test 2>&1 | tail -150
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+All unit tests pass (Surefire skips *IT). Now let's compile the test sources fully to catch any issues, then add the remaining tests: query service unit test, read-model repository IT, and web-layer tests for the controllers/error mapping.
+
+Bash
+IN
+./mvnw -q -o test-compile 2>&1 | tail -150
+
+OUT
+(Bash completed with no output)
+Good. Now let's add the remaining tests: PromotionQueryServiceTest, JdbcPromotionReadModelRepositoryIT, and @WebMvcTest tests for both controllers plus ErrorMapping.
+
+Update Todos
+
+Add optional reason to Promotion.rollback/cancel + command port/service overloads
+
+Move PromotionNotFoundException to shared application package
+
+Build query application layer (DTOs, PromotionQueryPort/Service, PromotionReadModelPort)
+
+Add read-model Flyway migration + JdbcPromotionReadModelRepository
+
+Add InMemoryDeploymentAdapter and wire Spring beans (@Repository/@Component/@Service)
+
+Build API layer: DTOs, PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Rename ReleasePilotApplicationTests to IT with Testcontainers Postgres
+
+Add PromotionQueryServiceTest (unit, mocked read-model port)
+
+Add JdbcPromotionReadModelRepositoryIT (Testcontainers)
+
+Add WebMvc tests for PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Run full build/test suite and fix issues
+Write PromotionQueryServiceTest.java
+82 lines
+package com.releasepilot.application.queries;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.PromotionId;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class PromotionQueryServiceTest {
+
+	@Mock
+	private PromotionReadModelPort readModel;
+
+	private PromotionQueryService service;
+
+	private final ApplicationId applicationId = ApplicationId.random();
+	private final PromotionId promotionId = PromotionId.random();
+
+	@BeforeEach
+	void setUp() {
+		service = new PromotionQueryService(readModel);
+	}
+
+	@Test
+	void getPromotionDetailDelegatesToTheReadModel() {
+		PromotionDetail detail = new PromotionDetail(
+				promotionId, applicationId, new com.releasepilot.domain.promotion.Version("1.0.0"), null,
+				com.releasepilot.domain.promotion.Environment.DEV,
+				com.releasepilot.domain.promotion.PromotionStatus.REQUESTED, "alice", null, List.of());
+		when(readModel.findPromotionDetail(promotionId)).thenReturn(Optional.of(detail));
+
+		assertThat(service.getPromotionDetail(promotionId)).contains(detail);
+	}
+
+	@Test
+	void getPromotionDetailPropagatesEmptyWhenNotFound() {
+		when(readModel.findPromotionDetail(promotionId)).thenReturn(Optional.empty());
+
+		assertThat(service.getPromotionDetail(promotionId)).isEmpty();
+	}
+
+	@Test
+	void getApplicationStatusDelegatesToTheReadModel() {
+		ApplicationEnvironmentStatus status = new ApplicationEnvironmentStatus(applicationId, List.of());
+		when(readModel.findApplicationEnvironmentStatus(applicationId)).thenReturn(status);
+
+		assertThat(service.getApplicationStatus(applicationId)).isEqualTo(status);
+	}
+
+	@Test
+	void getApplicationPromotionsDelegatesToTheReadModel() {
+		PromotionHistoryPage page = new PromotionHistoryPage(List.of(), 0, 20, 0);
+		when(readModel.findApplicationPromotions(applicationId, 0, 20)).thenReturn(page);
+
+		assertThat(service.getApplicationPromotions(applicationId, 0, 20)).isEqualTo(page);
+		verify(readModel).findApplicationPromotions(applicationId, 0, 20);
+	}
+
+	@Test
+	void getApplicationPromotionsRejectsANegativePage() {
+		assertThatThrownBy(() -> service.getApplicationPromotions(applicationId, -1, 20))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void getApplicationPromotionsRejectsAZeroOrNegativePageSize() {
+		assertThatThrownBy(() -> service.getApplicationPromotions(applicationId, 0, 0))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+}
+Now the read-model repository integration test, mirroring JdbcPromotionRepositoryIT's style:
+
+Read JdbcPromotionRepositoryIT.java (lines 61-100)
+Write JdbcPromotionReadModelRepositoryIT.java
+208 lines
+package com.releasepilot.infrastructure.persistence.readmodel;
+
+import com.releasepilot.application.queries.ApplicationEnvironmentStatus;
+import com.releasepilot.application.queries.PromotionDetail;
+import com.releasepilot.application.queries.PromotionHistoryPage;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.PromotionStatus;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
+
+import java.time.Instant;
+import java.sql.Timestamp;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Exercises {@link JdbcPromotionReadModelRepository} against a real PostgreSQL instance (via
+ * Testcontainers). Since the read-model projector consumer that would normally populate these
+ * tables (SPECS §8) does not exist yet, rows are seeded directly with {@link JdbcTemplate} —
+ * exactly the shape a projector would write — to prove the read-side queries (SPECS §7) are
+ * correct against that schema.
+ *
+ * <p>Named {@code *IT} rather than {@code *Test} — see {@code JdbcPromotionRepositoryIT} for why
+ * only {@code mvnw verify} runs it.
+ */
+@Testcontainers
+class JdbcPromotionReadModelRepositoryIT {
+
+	@Container
+	static final PostgreSQLContainer POSTGRES =
+			new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
+
+	private static HikariDataSource dataSource;
+	private static JdbcTemplate jdbcTemplate;
+	private static JdbcPromotionReadModelRepository repository;
+
+	private final ApplicationId applicationId = ApplicationId.random();
+
+	@BeforeAll
+	static void migrateSchemaAndConnect() {
+		HikariConfig config = new HikariConfig();
+		config.setJdbcUrl(POSTGRES.getJdbcUrl());
+		config.setUsername(POSTGRES.getUsername());
+		config.setPassword(POSTGRES.getPassword());
+		dataSource = new HikariDataSource(config);
+
+		Flyway.configure().dataSource(dataSource).load().migrate();
+
+		jdbcTemplate = new JdbcTemplate(dataSource);
+		repository = new JdbcPromotionReadModelRepository(jdbcTemplate);
+	}
+
+	@AfterAll
+	static void closeDataSource() {
+		dataSource.close();
+	}
+
+	@BeforeEach
+	void cleanTables() {
+		jdbcTemplate.update("DELETE FROM promotion_detail_history");
+		jdbcTemplate.update("DELETE FROM promotion_detail");
+		jdbcTemplate.update("DELETE FROM application_environment_status");
+		jdbcTemplate.update("DELETE FROM promotion_history");
+	}
+
+	// --- findPromotionDetail ---
+
+	@Test
+	void findPromotionDetailReturnsEmptyForAnUnknownId() {
+		assertThat(repository.findPromotionDetail(PromotionId.random())).isEmpty();
+	}
+
+	@Test
+	void findPromotionDetailReturnsTheRowWithItsOrderedHistory() {
+		PromotionId promotionId = PromotionId.random();
+		seedPromotionDetail(promotionId, "APPROVED", "bob");
+		seedHistoryEntry(promotionId, "REQUESTED", "alice", Instant.parse("2026-01-01T00:00:00Z"));
+		seedHistoryEntry(promotionId, "APPROVED", "bob", Instant.parse("2026-01-02T00:00:00Z"));
+
+		PromotionDetail detail = repository.findPromotionDetail(promotionId).orElseThrow();
+
+		assertThat(detail.id()).isEqualTo(promotionId);
+		assertThat(detail.applicationId()).isEqualTo(applicationId);
+		assertThat(detail.status()).isEqualTo(PromotionStatus.APPROVED);
+		assertThat(detail.requestedBy()).isEqualTo("alice");
+		assertThat(detail.approvedBy()).isEqualTo("bob");
+		assertThat(detail.history()).extracting(PromotionDetail.PromotionHistoryEntry::status)
+				.containsExactly(PromotionStatus.REQUESTED, PromotionStatus.APPROVED);
+	}
+
+	// --- findApplicationEnvironmentStatus ---
+
+	@Test
+	void findApplicationEnvironmentStatusAlwaysReturnsAllThreeEnvironments() {
+		ApplicationEnvironmentStatus status = repository.findApplicationEnvironmentStatus(applicationId);
+
+		assertThat(status.environments()).extracting(ApplicationEnvironmentStatus.EnvironmentStatus::environment)
+				.containsExactly(Environment.DEV, Environment.STAGING, Environment.PRODUCTION);
+		assertThat(status.environments()).allSatisfy(env -> assertThat(env.status()).isNull());
+	}
+
+	@Test
+	void findApplicationEnvironmentStatusFillsInKnownEnvironmentsAndDefaultsTheRest() {
+		PromotionId lastPromotionId = PromotionId.random();
+		jdbcTemplate.update(
+				"""
+				INSERT INTO application_environment_status
+				    (application_id, environment, current_version, status, last_promotion_id)
+				VALUES (?, 'DEV', '1.4.0', 'COMPLETED', ?)
+				""",
+				applicationId.value(),
+				lastPromotionId.value());
+
+		ApplicationEnvironmentStatus status = repository.findApplicationEnvironmentStatus(applicationId);
+
+		var dev = status.environments().stream().filter(e -> e.environment() == Environment.DEV).findFirst()
+				.orElseThrow();
+		assertThat(dev.currentVersion().value()).isEqualTo("1.4.0");
+		assertThat(dev.status()).isEqualTo(PromotionStatus.COMPLETED);
+		assertThat(dev.lastPromotionId()).isEqualTo(lastPromotionId);
+
+		var staging = status.environments().stream().filter(e -> e.environment() == Environment.STAGING).findFirst()
+				.orElseThrow();
+		assertThat(staging.currentVersion()).isNull();
+		assertThat(staging.status()).isNull();
+		assertThat(staging.lastPromotionId()).isNull();
+	}
+
+	// --- findApplicationPromotions ---
+
+	@Test
+	void findApplicationPromotionsPagesNewestFirstAndReportsTheTotal() {
+		seedPromotionHistory(applicationId, "1.0.0", Instant.parse("2026-01-01T00:00:00Z"));
+		seedPromotionHistory(applicationId, "1.1.0", Instant.parse("2026-01-02T00:00:00Z"));
+		seedPromotionHistory(applicationId, "1.2.0", Instant.parse("2026-01-03T00:00:00Z"));
+
+		PromotionHistoryPage firstPage = repository.findApplicationPromotions(applicationId, 0, 2);
+		assertThat(firstPage.total()).isEqualTo(3);
+		assertThat(firstPage.items()).hasSize(2);
+		assertThat(firstPage.items().get(0).version().value()).isEqualTo("1.2.0");
+		assertThat(firstPage.items().get(1).version().value()).isEqualTo("1.1.0");
+
+		PromotionHistoryPage secondPage = repository.findApplicationPromotions(applicationId, 1, 2);
+		assertThat(secondPage.items()).hasSize(1);
+		assertThat(secondPage.items().get(0).version().value()).isEqualTo("1.0.0");
+	}
+
+	@Test
+	void findApplicationPromotionsReturnsAnEmptyPageForAnApplicationWithNoHistory() {
+		PromotionHistoryPage page = repository.findApplicationPromotions(ApplicationId.random(), 0, 20);
+
+		assertThat(page.items()).isEmpty();
+		assertThat(page.total()).isZero();
+	}
+
+	private void seedPromotionDetail(PromotionId promotionId, String status, String approvedBy) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO promotion_detail
+				    (id, application_id, version, from_environment, target_environment, status,
+				     requested_by_user_id, approved_by_user_id)
+				VALUES (?, ?, '1.0.0', NULL, 'DEV', ?, 'alice', ?)
+				""",
+				promotionId.value(),
+				applicationId.value(),
+				status,
+				approvedBy);
+	}
+
+	private void seedHistoryEntry(PromotionId promotionId, String status, String actor, Instant occurredAt) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO promotion_detail_history (promotion_id, status, actor_user_id, occurred_at)
+				VALUES (?, ?, ?, ?)
+				""",
+				promotionId.value(),
+				status,
+				actor,
+				Timestamp.from(occurredAt));
+	}
+
+	private void seedPromotionHistory(ApplicationId applicationId, String version, Instant requestedAt) {
+		jdbcTemplate.update(
+				"""
+				INSERT INTO promotion_history
+				    (id, application_id, version, from_environment, target_environment, status, requested_at)
+				VALUES (?, ?, ?, NULL, 'DEV', 'REQUESTED', ?)
+				""",
+				UUID.randomUUID(),
+				applicationId.value(),
+				version,
+				Timestamp.from(requestedAt));
+	}
+}
+Bash
+IN
+find ~/.m2 -iname "spring-test-*.jar" | sort -V | tail -3
+find ~/.m2 -iname "spring-boot-test-*.jar" | sort -V | tail -3
+
+OUT
+/home/juanjo/.m2/repository/org/springframework/spring-test/6.0.11/spring-test-6.0.11.jar
+/home/juanjo/.m2/repository/org/springframework/spring-test/7.0.8/spring-test-7.0.8.jar
+/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-test-autoconfigure/4.0.7/spring-boot-test-autoconfigure-4.0.7.jar
+/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-test/3.1.2/spring-boot-test-3.1.2.jar
+/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-test/4.0.7/spring-boot-test-4.0.7.jar
+Bash
+IN
+unzip -l ~/.m2/repository/org/springframework/test/spring-test/7.0.8/spring-test-7.0.8.jar 2>/dev/null | grep -i "MockitoBean" 
+unzip -l /home/juanjo/.m2/repository/org/springframework/spring-test/7.0.8/spring-test-7.0.8.jar | grep -i "mockitobean\.class"
+
+OUT
+     1448  1980-02-01 00:00   org/springframework/test/context/bean/override/mockito/MockitoBean.class
+Good, @MockitoBean is available. Let's write the WebMvc tests.
+
+Write PromotionCommandControllerTest.java
+168 lines
+package com.releasepilot.api.controllers;
+
+import com.releasepilot.application.PromotionNotFoundException;
+import com.releasepilot.application.commands.PromotionCommandPort;
+import com.releasepilot.domain.promotion.Actor;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Role;
+import com.releasepilot.domain.promotion.Version;
+import com.releasepilot.domain.promotion.errors.DuplicatePromotionInProgressError;
+import com.releasepilot.domain.promotion.errors.EnvironmentSkippedError;
+import com.releasepilot.domain.promotion.errors.UnauthorizedApproverError;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.webmvc.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * Verifies the thin HTTP boundary for the write side end to end at the servlet layer, including
+ * {@link com.releasepilot.api.ErrorMapping}'s status codes (SPECS §10) — the port itself is
+ * mocked, since the aggregate's business rules are already covered by {@code PromotionTest} and
+ * {@code PromotionCommandServiceTest}.
+ */
+@WebMvcTest(PromotionCommandController.class)
+class PromotionCommandControllerTest {
+
+	@Autowired
+	private MockMvc mockMvc;
+
+	@MockitoBean
+	private PromotionCommandPort commandPort;
+
+	private final PromotionId promotionId = PromotionId.random();
+
+	@Test
+	void requestPromotionReturns201WithLocationAndBody() throws Exception {
+		ApplicationId applicationId = ApplicationId.random();
+		when(commandPort.requestPromotion(eq(applicationId), eq(new Version("1.4.0")), eq(Environment.DEV), any()))
+				.thenReturn(promotionId);
+
+		mockMvc.perform(post("/promotions")
+						.contentType("application/json")
+						.content("""
+								{
+								  "applicationId": "%s",
+								  "version": "1.4.0",
+								  "targetEnvironment": "DEV",
+								  "requestedBy": { "userId": "alice", "role": "REQUESTER" }
+								}
+								""".formatted(applicationId.value())))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.id").value(promotionId.value().toString()));
+	}
+
+	@Test
+	void requestPromotionWithAnUnknownRoleReturns400() throws Exception {
+		mockMvc.perform(post("/promotions")
+						.contentType("application/json")
+						.content("""
+								{
+								  "applicationId": "%s",
+								  "version": "1.4.0",
+								  "targetEnvironment": "DEV",
+								  "requestedBy": { "userId": "alice", "role": "NOT_A_ROLE" }
+								}
+								""".formatted(ApplicationId.random().value())))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void requestPromotionSkippingAnEnvironmentReturns422() throws Exception {
+		when(commandPort.requestPromotion(any(), any(), eq(Environment.PRODUCTION), any()))
+				.thenThrow(new EnvironmentSkippedError(Environment.DEV, Environment.PRODUCTION));
+
+		mockMvc.perform(post("/promotions")
+						.contentType("application/json")
+						.content("""
+								{
+								  "applicationId": "%s",
+								  "version": "1.4.0",
+								  "targetEnvironment": "PRODUCTION",
+								  "requestedBy": { "userId": "alice", "role": "REQUESTER" }
+								}
+								""".formatted(ApplicationId.random().value())))
+				.andExpect(status().isUnprocessableEntity());
+	}
+
+	@Test
+	void requestPromotionWithADuplicateInFlightReturns409() throws Exception {
+		when(commandPort.requestPromotion(any(), any(), any(), any()))
+				.thenThrow(new DuplicatePromotionInProgressError(ApplicationId.random(), Environment.DEV));
+
+		mockMvc.perform(post("/promotions")
+						.contentType("application/json")
+						.content("""
+								{
+								  "applicationId": "%s",
+								  "version": "1.4.0",
+								  "targetEnvironment": "DEV",
+								  "requestedBy": { "userId": "alice", "role": "REQUESTER" }
+								}
+								""".formatted(ApplicationId.random().value())))
+				.andExpect(status().isConflict());
+	}
+
+	@Test
+	void approveWithoutTheApproverRoleReturns403() throws Exception {
+		when(commandPort.approvePromotion(eq(promotionId), any()))
+				.thenThrow(new UnauthorizedApproverError("alice"));
+
+		mockMvc.perform(post("/promotions/" + promotionId.value() + "/approve")
+						.contentType("application/json")
+						.content("""
+								{ "approvedBy": { "userId": "alice", "role": "REQUESTER" } }
+								"""))
+				.andExpect(status().isForbidden());
+	}
+
+	@Test
+	void approveAnUnknownPromotionReturns404() throws Exception {
+		when(commandPort.approvePromotion(eq(promotionId), any()))
+				.thenThrow(new PromotionNotFoundException(promotionId));
+
+		mockMvc.perform(post("/promotions/" + promotionId.value() + "/approve")
+						.contentType("application/json")
+						.content("""
+								{ "approvedBy": { "userId": "bob", "role": "APPROVER" } }
+								"""))
+				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void rollbackPassesTheOptionalReasonThrough() throws Exception {
+		when(commandPort.rollbackPromotion(eq(promotionId), any(Actor.class), eq("smoke tests failed")))
+				.thenReturn(promotionId);
+
+		mockMvc.perform(post("/promotions/" + promotionId.value() + "/rollback")
+						.contentType("application/json")
+						.content("""
+								{ "rolledBackBy": { "userId": "bob", "role": "APPROVER" }, "reason": "smoke tests failed" }
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(promotionId.value().toString()));
+	}
+
+	@Test
+	void cancelWithoutAReasonPassesNullThrough() throws Exception {
+		when(commandPort.cancelPromotion(eq(promotionId), any(Actor.class), isNull())).thenReturn(promotionId);
+
+		mockMvc.perform(post("/promotions/" + promotionId.value() + "/cancel")
+						.contentType("application/json")
+						.content("""
+								{ "cancelledBy": { "userId": "alice", "role": "REQUESTER" } }
+								"""))
+				.andExpect(status().isOk());
+	}
+}
+Edit PromotionCommandControllerTest.java
+Removed 1 line
+Bash
+IN
+for j in $(find ~/.m2 -iname "spring-boot-webmvc-test-autoconfigure*.jar" -o -iname "spring-boot-test-autoconfigure-4*.jar"); do echo "=== $j ==="; unzip -l "$j" | grep -i "WebMvcTest.class"; done
+find ~/.m2 -iname "*webmvc*test*autoconfigure*.jar"
+
+OUT
+=== /home/juanjo/.m2/repository/org/springframework/boot/spring-boot-test-autoconfigure/4.0.7/spring-boot-test-autoconfigure-4.0.7.jar ===
+Bash
+IN
+find ~/.m2 -iname "*.jar" | xargs -I{} sh -c 'unzip -l "{}" 2>/dev/null | grep -q "webmvc/test/autoconfigure/WebMvcTest.class" && echo {}' 2>/dev/null
+
+OUT
+Exit code 123
+/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-webmvc-test/4.0.7/spring-boot-webmvc-test-4.0.7.jar
+Bash
+IN
+unzip -l ~/.m2/repository/org/springframework/boot/spring-boot-webmvc-test/4.0.7/spring-boot-webmvc-test-4.0.7.jar | grep -i "WebMvcTest.class\|MockMvc.class" | head
+
+OUT
+     1597  1980-02-01 00:00   org/springframework/boot/webmvc/test/autoconfigure/AutoConfigureMockMvc.class
+     2007  1980-02-01 00:00   org/springframework/boot/webmvc/test/autoconfigure/WebMvcTest.class
+Package moved to org.springframework.boot.webmvc.test.autoconfigure. Let me fix the import and also the deprecated isUnprocessableEntity().
+
+Edit PromotionCommandControllerTest.java
+Added 1 line
+Edit PromotionCommandControllerTest.java
+Modified
+Bash
+IN
+unzip -l ~/.m2/repository/org/springframework/spring-test/7.0.8/spring-test-7.0.8.jar | grep -i "MockMvcRequestBuilders.class\|MockMvcResultMatchers.class\|/MockMvc.class"
+
+OUT
+     8154  1980-02-01 00:00   org/springframework/test/web/servlet/MockMvc.class
+     6496  1980-02-01 00:00   org/springframework/test/web/servlet/request/MockMvcRequestBuilders.class
+     8944  1980-02-01 00:00   org/springframework/test/web/servlet/result/MockMvcResultMatchers.class
+Good, those packages are unchanged. Now let's write the query controller test.
+
+Write PromotionQueryControllerTest.java
+112 lines
+package com.releasepilot.api.controllers;
+
+import com.releasepilot.application.queries.ApplicationEnvironmentStatus;
+import com.releasepilot.application.queries.PromotionDetail;
+import com.releasepilot.application.queries.PromotionHistoryPage;
+import com.releasepilot.application.queries.PromotionQueryPort;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Environment;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.PromotionStatus;
+import com.releasepilot.domain.promotion.Version;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.List;
+import java.util.Optional;
+
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/** Verifies the thin HTTP boundary for the read side (SPECS §7/§10) at the servlet layer. */
+@WebMvcTest(PromotionQueryController.class)
+class PromotionQueryControllerTest {
+
+	@Autowired
+	private MockMvc mockMvc;
+
+	@MockitoBean
+	private PromotionQueryPort queryPort;
+
+	@Test
+	void getPromotionDetailReturns200WithTheFlattenedShape() throws Exception {
+		PromotionId promotionId = PromotionId.random();
+		ApplicationId applicationId = ApplicationId.random();
+		PromotionDetail detail = new PromotionDetail(
+				promotionId, applicationId, new Version("1.4.0"), null, Environment.DEV,
+				PromotionStatus.REQUESTED, "alice", null, List.of());
+		when(queryPort.getPromotionDetail(promotionId)).thenReturn(Optional.of(detail));
+
+		mockMvc.perform(get("/promotions/" + promotionId.value()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(promotionId.value().toString()))
+				.andExpect(jsonPath("$.status").value("REQUESTED"))
+				.andExpect(jsonPath("$.requestedBy").value("alice"));
+	}
+
+	@Test
+	void getPromotionDetailReturns404WhenMissing() throws Exception {
+		PromotionId promotionId = PromotionId.random();
+		when(queryPort.getPromotionDetail(promotionId)).thenReturn(Optional.empty());
+
+		mockMvc.perform(get("/promotions/" + promotionId.value())).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void getPromotionDetailWithAMalformedIdReturns400() throws Exception {
+		mockMvc.perform(get("/promotions/not-a-uuid")).andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void getApplicationStatusReturnsAllThreeEnvironments() throws Exception {
+		ApplicationId applicationId = ApplicationId.random();
+		ApplicationEnvironmentStatus status = new ApplicationEnvironmentStatus(
+				applicationId,
+				List.of(
+						new ApplicationEnvironmentStatus.EnvironmentStatus(
+								Environment.DEV, new Version("1.4.0"), PromotionStatus.COMPLETED, PromotionId.random()),
+						new ApplicationEnvironmentStatus.EnvironmentStatus(Environment.STAGING, null, null, null),
+						new ApplicationEnvironmentStatus.EnvironmentStatus(Environment.PRODUCTION, null, null, null)));
+		when(queryPort.getApplicationStatus(applicationId)).thenReturn(status);
+
+		mockMvc.perform(get("/applications/" + applicationId.value() + "/status"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.environments", org.hamcrest.Matchers.hasSize(3)))
+				.andExpect(jsonPath("$.environments[0].environment").value("DEV"))
+				.andExpect(jsonPath("$.environments[0].currentVersion").value("1.4.0"))
+				.andExpect(jsonPath("$.environments[1].status").doesNotExist());
+	}
+
+	@Test
+	void getApplicationPromotionsDefaultsPageAndPageSize() throws Exception {
+		ApplicationId applicationId = ApplicationId.random();
+		when(queryPort.getApplicationPromotions(eq(applicationId), eq(0), eq(20)))
+				.thenReturn(new PromotionHistoryPage(List.of(), 0, 20, 0));
+
+		mockMvc.perform(get("/applications/" + applicationId.value() + "/promotions"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.page").value(0))
+				.andExpect(jsonPath("$.pageSize").value(20))
+				.andExpect(jsonPath("$.total").value(0));
+	}
+
+	@Test
+	void getApplicationPromotionsPassesExplicitPagingParams() throws Exception {
+		ApplicationId applicationId = ApplicationId.random();
+		when(queryPort.getApplicationPromotions(eq(applicationId), eq(2), eq(5)))
+				.thenReturn(new PromotionHistoryPage(List.of(), 2, 5, 11));
+
+		mockMvc.perform(get("/applications/" + applicationId.value() + "/promotions?page=2&pageSize=5"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.page").value(2))
+				.andExpect(jsonPath("$.pageSize").value(5))
+				.andExpect(jsonPath("$.total").value(11));
+	}
+}
+Edit PromotionQueryControllerTest.java
+Modified
+Now let's compile the test sources.
+
+Bash
+IN
+./mvnw -q -o test-compile 2>&1 | tail -200
+
+OUT
+(Bash completed with no output)
+Compiles clean. Let's run the unit test suite (Surefire, no Docker needed) to verify the new WebMvc + query service tests actually pass.
+
+Bash
+IN
+./mvnw -q -o test 2>&1 | tail -250
+
+OUT
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (/home/juanjo/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+19:45:50.477 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionQueryControllerTest]: PromotionQueryControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:45:50.569 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionQueryControllerTest
+19:45:50.570 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionQueryControllerTest]: PromotionQueryControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+19:45:50.576 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionQueryControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T19:45:50.733+02:00  INFO 178554 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Starting PromotionQueryControllerTest using Java 21.0.11 with PID 178554 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T19:45:50.734+02:00  INFO 178554 --- [           main] c.r.a.c.PromotionQueryControllerTest     : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T19:45:51.063+02:00  INFO 178554 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-26T19:45:51.063+02:00  INFO 178554 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-26T19:45:51.065+02:00  INFO 178554 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-07-26T19:45:51.081+02:00  INFO 178554 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Started PromotionQueryControllerTest in 0.484 seconds (process running for 1.614)
+2026-07-26T19:45:51.251+02:00  INFO 178554 --- [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionCommandControllerTest]: PromotionCommandControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-07-26T19:45:51.263+02:00  INFO 178554 --- [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionCommandControllerTest
+2026-07-26T19:45:51.263+02:00  INFO 178554 --- [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionCommandControllerTest]: PromotionCommandControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-07-26T19:45:51.266+02:00  INFO 178554 --- [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionCommandControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-26T19:45:51.280+02:00  INFO 178554 --- [           main] c.r.a.c.PromotionCommandControllerTest   : Starting PromotionCommandControllerTest using Java 21.0.11 with PID 178554 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-26T19:45:51.281+02:00  INFO 178554 --- [           main] c.r.a.c.PromotionCommandControllerTest   : No active profile set, falling back to 1 default profile: "default"
+2026-07-26T19:45:51.381+02:00  INFO 178554 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-26T19:45:51.381+02:00  INFO 178554 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-26T19:45:51.381+02:00  INFO 178554 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-07-26T19:45:51.385+02:00  INFO 178554 --- [           main] c.r.a.c.PromotionCommandControllerTest   : Started PromotionCommandControllerTest in 0.115 seconds (process running for 1.917)
+All tests pass (no ERROR/FAILURE lines, and the run completed). Let's confirm the summary explicitly:
+
+Bash
+IN
+./mvnw -o test 2>&1 | grep -E "Tests run|ERROR|BUILD"
+
+OUT
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.581 s -- in com.releasepilot.application.commands.PromotionCommandServiceTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.038 s -- in com.releasepilot.application.queries.PromotionQueryServiceTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.766 s -- in com.releasepilot.api.controllers.PromotionQueryControllerTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.192 s -- in com.releasepilot.api.controllers.PromotionCommandControllerTest
+[INFO] Tests run: 29, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in com.releasepilot.domain.promotion.PromotionTest
+[INFO] Tests run: 64, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+All 64 unit tests pass. Now let's check for Docker to try running the full integration suite; if unavailable, I'll at least verify compilation of the IT tests is solid (already confirmed) and note it in the summary.
+
+Update Todos
+
+Add optional reason to Promotion.rollback/cancel + command port/service overloads
+
+Move PromotionNotFoundException to shared application package
+
+Build query application layer (DTOs, PromotionQueryPort/Service, PromotionReadModelPort)
+
+Add read-model Flyway migration + JdbcPromotionReadModelRepository
+
+Add InMemoryDeploymentAdapter and wire Spring beans (@Repository/@Component/@Service)
+
+Build API layer: DTOs, PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Rename ReleasePilotApplicationTests to IT with Testcontainers Postgres
+
+Add PromotionQueryServiceTest (unit, mocked read-model port)
+
+Add JdbcPromotionReadModelRepositoryIT (Testcontainers)
+
+Add WebMvc tests for PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Run full build/test suite and fix issues
+Read README.md
+Edit README.md
+Added 3 lines
+Just spellcheck info, no real issue. Now update the wiring paragraphs that are now stale:
+
+Edit README.md
+Added 2 lines
+Edit README.md
+Added 3 lines
+Now let's add a new "HTTP API" section and refresh the project structure diagram:
+
+Edit README.md
+Added 51 lines
+Just a spelling hint, fine. Let's do a final full build to make sure everything still compiles and unit tests pass after the README changes (no code changed, but let's be safe and run the whole suite once more).
+
+Bash
+IN
+./mvnw -o clean test 2>&1 | grep -E "Tests run|ERROR|BUILD|WARN.*deprecat" 
+
+OUT
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.639 s -- in com.releasepilot.application.commands.PromotionCommandServiceTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in com.releasepilot.application.queries.PromotionQueryServiceTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.762 s -- in com.releasepilot.api.controllers.PromotionQueryControllerTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.182 s -- in com.releasepilot.api.controllers.PromotionCommandControllerTest
+[INFO] Tests run: 29, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in com.releasepilot.domain.promotion.PromotionTest
+[INFO] Tests run: 64, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+Bash
+IN
+git -C /home/juanjo/git/agile-monkeys-test status --short
+
+OUT
+ M README.md
+ D src/main/java/com/releasepilot/api/controllers/.gitkeep
+ M src/main/java/com/releasepilot/application/commands/PromotionCommandPort.java
+ M src/main/java/com/releasepilot/application/commands/PromotionCommandService.java
+ D src/main/java/com/releasepilot/application/commands/PromotionNotFoundException.java
+ D src/main/java/com/releasepilot/application/queries/.gitkeep
+ M src/main/java/com/releasepilot/domain/promotion/Promotion.java
+ D src/main/java/com/releasepilot/infrastructure/adapters/inmemory/.gitkeep
+ M src/main/java/com/releasepilot/infrastructure/persistence/JdbcPromotionRepository.java
+ M src/main/java/com/releasepilot/infrastructure/persistence/OutboxEventPublisher.java
+ D src/main/java/com/releasepilot/infrastructure/persistence/readmodel/.gitkeep
+RM src/test/java/com/releasepilot/ReleasePilotApplicationTests.java -> src/test/java/com/releasepilot/ReleasePilotApplicationIT.java
+ M src/test/java/com/releasepilot/application/commands/PromotionCommandServiceTest.java
+ M src/test/java/com/releasepilot/domain/promotion/PromotionTest.java
+?? src/main/java/com/releasepilot/api/ErrorMapping.java
+?? src/main/java/com/releasepilot/api/controllers/PromotionCommandController.java
+?? src/main/java/com/releasepilot/api/controllers/PromotionQueryController.java
+?? src/main/java/com/releasepilot/api/dto/
+?? src/main/java/com/releasepilot/application/PromotionNotFoundException.java
+?? src/main/java/com/releasepilot/application/queries/ApplicationEnvironmentStatus.java
+?? src/main/java/com/releasepilot/application/queries/PromotionDetail.java
+?? src/main/java/com/releasepilot/application/queries/PromotionHistoryPage.java
+?? src/main/java/com/releasepilot/application/queries/PromotionQueryPort.java
+?? src/main/java/com/releasepilot/application/queries/PromotionQueryService.java
+?? src/main/java/com/releasepilot/application/queries/PromotionReadModelPort.java
+?? src/main/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryDeploymentAdapter.java
+?? src/main/java/com/releasepilot/infrastructure/persistence/readmodel/JdbcPromotionReadModelRepository.java
+?? src/main/resources/db/migration/V3__create_read_model_tables.sql
+?? src/test/java/com/releasepilot/api/
+?? src/test/java/com/releasepilot/application/queries/
+?? src/test/java/com/releasepilot/infrastructure/persistence/readmodel/
+This all looks intentional and matches the plan. Let's mark the last task complete.
+
+Update Todos
+
+Add optional reason to Promotion.rollback/cancel + command port/service overloads
+
+Move PromotionNotFoundException to shared application package
+
+Build query application layer (DTOs, PromotionQueryPort/Service, PromotionReadModelPort)
+
+Add read-model Flyway migration + JdbcPromotionReadModelRepository
+
+Add InMemoryDeploymentAdapter and wire Spring beans (@Repository/@Component/@Service)
+
+Build API layer: DTOs, PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Rename ReleasePilotApplicationTests to IT with Testcontainers Postgres
+
+Add PromotionQueryServiceTest (unit, mocked read-model port)
+
+Add JdbcPromotionReadModelRepositoryIT (Testcontainers)
+
+Add WebMvc tests for PromotionCommandController, PromotionQueryController, ErrorMapping
+
+Run full build/test suite and fix issues
+Built the HTTP command and query layers on top of the existing domain/write-side work, wiring everything through Spring while keeping the hexagonal boundaries intact:
+
+Commands (§4/§10)
+
+PromotionCommandController — thin POST endpoints for all six commands, delegating to the existing PromotionCommandPort.
+Closed a real spec gap: RollbackPromotion/CancelPromotion list an optional reason in both the command input and event payload, but the aggregate never carried one. Added additive reason-aware overloads on Promotion, PromotionCommandPort, and PromotionCommandService (old call sites untouched).
+Every command handler method is now @Transactional, so aggregate state + outbox row genuinely commit together (§5.1) — previously true only in prose.
+Queries (§7) — new CQRS read side, fully separate from the write path:
+
+PromotionQueryPort/PromotionQueryService (application layer) + PromotionReadModelPort/JdbcPromotionReadModelRepository (infrastructure), backed by new promotion_detail, promotion_detail_history, application_environment_status, and promotion_history tables (V3 migration).
+PromotionQueryController for the three GET endpoints.
+Caveat worth flagging: these read-model tables are populated by the projector consumer described in §8, which doesn't exist yet (that's the async-processing/consumers piece, out of this branch's scope). So right now GET requests against a fresh DB legitimately return 404/empty — I seeded rows directly in the integration test to prove the query SQL itself is correct, standing in for that future consumer.
+Wiring/plumbing
+
+Registered JdbcPromotionRepository, OutboxEventPublisher, the new read-model repository, and both application services as real Spring beans, plus a new InMemoryDeploymentAdapter stub (§6) — StartDeployment needed a live DeploymentPort bean for the context to boot. Left OutboxRelay unwired on purpose (that's §8 territory).
+ErrorMapping (@RestControllerAdvice) maps the sealed DomainError hierarchy + not-found + bad-input to the documented 4xx codes via an exhaustive switch (§10/§11).
+Moved PromotionNotFoundException up to a shared application package since both command and query sides need it.
+Tests: added unit tests for the reason overloads, PromotionQueryService, and @WebMvcTest tests for both controllers + error mapping (all passing, 64 unit tests total, no Docker needed); added JdbcPromotionReadModelRepositoryIT and renamed the context-smoke test to ReleasePilotApplicationIT with Testcontainers Postgres, since wiring real beans meant it now needs a database. I don't have Docker in this sandbox, so I couldn't run ./mvnw verify myself — worth running that locally before merging to confirm the new/renamed *IT tests pass.
+
+README updated to match (HTTP API section, corrected wiring claims, refreshed test docs).
+
