@@ -1,5 +1,6 @@
 package com.releasepilot.application.commands;
 
+import com.releasepilot.application.PromotionNotFoundException;
 import com.releasepilot.domain.ports.DeploymentPort;
 import com.releasepilot.domain.ports.DeploymentRef;
 import com.releasepilot.domain.ports.EventPublisherPort;
@@ -228,6 +229,31 @@ class PromotionCommandServiceTest {
 		service.cancelPromotion(id, requester);
 
 		assertThat(publishedEvent().eventType()).isEqualTo(Promotion.EVENT_PROMOTION_CANCELLED);
+	}
+
+	@Test
+	void cancelPromotionWithAReasonCarriesItInThePublishedEvent() {
+		PromotionId id = service.requestPromotion(applicationId, version, Environment.DEV, requester);
+		Promotion promotion = savedPromotion();
+		when(repository.findById(id)).thenReturn(Optional.of(promotion));
+
+		service.cancelPromotion(id, requester, "duplicate request");
+
+		assertThat(publishedEvent().payload()).containsEntry("reason", "duplicate request");
+	}
+
+	@Test
+	void rollbackPromotionWithAReasonCarriesItInThePublishedEvent() {
+		when(deploymentPort.trigger(any(), any(), any())).thenReturn(new DeploymentRef("deploy-1"));
+		PromotionId id = service.requestPromotion(applicationId, version, Environment.DEV, requester);
+		Promotion promotion = savedPromotion();
+		when(repository.findById(id)).thenReturn(Optional.of(promotion));
+		service.approvePromotion(id, approver);
+		service.startDeployment(id, approver);
+
+		service.rollbackPromotion(id, approver, "smoke tests failed");
+
+		assertThat(publishedEvent().payload()).containsEntry("reason", "smoke tests failed");
 	}
 
 	/** Captures the {@link DomainEvent} most recently handed to {@link EventPublisherPort#publish}. */

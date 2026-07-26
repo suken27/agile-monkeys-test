@@ -3,6 +3,7 @@ package com.releasepilot.infrastructure.persistence;
 import com.releasepilot.domain.ports.EventPublisherPort;
 import com.releasepilot.domain.promotion.DomainEvent;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 import java.sql.Timestamp;
@@ -16,6 +17,7 @@ import java.sql.Timestamp;
  * {@link com.releasepilot.infrastructure.queue.OutboxRelay} is the separate, decoupled component
  * that later reads unsent rows here and delivers them to the message broker.
  */
+@Component
 public class OutboxEventPublisher implements EventPublisherPort {
 
 	private final JdbcTemplate jdbcTemplate;

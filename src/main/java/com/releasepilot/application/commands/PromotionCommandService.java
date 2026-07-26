@@ -1,5 +1,6 @@
 package com.releasepilot.application.commands;
 
+import com.releasepilot.application.PromotionNotFoundException;
 import com.releasepilot.domain.ports.DeploymentPort;
 import com.releasepilot.domain.ports.DeploymentRef;
 import com.releasepilot.domain.ports.EventPublisherPort;
@@ -11,6 +12,8 @@ import com.releasepilot.domain.promotion.Environment;
 import com.releasepilot.domain.promotion.Promotion;
 import com.releasepilot.domain.promotion.PromotionId;
 import com.releasepilot.domain.promotion.Version;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -24,7 +27,12 @@ import java.util.Map;
  * transition recorded on the aggregate and publishes them through {@link EventPublisherPort}
  * (SPECS §5.1) — the state write and the publish call happen back-to-back in the same handler
  * invocation so the outbox adapter backing the port can enlist both in one DB transaction.
+ *
+ * <p>Each method is {@code @Transactional} so the aggregate's persisted state and its outbox
+ * row(s) commit or roll back together (SPECS §5.1) — the queue publish and downstream consumers
+ * run after this transaction commits, decoupled from the command-handling call stack.
  */
+@Service
 public class PromotionCommandService implements PromotionCommandPort {
 
 	private final DeploymentPort deploymentPort;
@@ -39,6 +47,7 @@ public class PromotionCommandService implements PromotionCommandPort {
 	}
 
 	@Override
+	@Transactional
 	public PromotionId requestPromotion(
 			ApplicationId applicationId, Version version, Environment targetEnvironment, Actor requestedBy) {
 		Environment lastCompleted = repository.findLastCompletedEnvironment(applicationId, version).orElse(null);
@@ -53,6 +62,7 @@ public class PromotionCommandService implements PromotionCommandPort {
 	}
 
 	@Override
+	@Transactional
 	public PromotionId approvePromotion(PromotionId promotionId, Actor approvedBy) {
 		Promotion promotion = load(promotionId);
 		promotion.approve(approvedBy);
@@ -62,6 +72,7 @@ public class PromotionCommandService implements PromotionCommandPort {
 	}
 
 	@Override
+	@Transactional
 	public PromotionId startDeployment(PromotionId promotionId, Actor startedBy) {
 		Promotion promotion = load(promotionId);
 		promotion.startDeployment(startedBy);
@@ -73,6 +84,7 @@ public class PromotionCommandService implements PromotionCommandPort {
 	}
 
 	@Override
+	@Transactional
 	public PromotionId completePromotion(PromotionId promotionId, Actor completedBy) {
 		Promotion promotion = load(promotionId);
 		promotion.complete(completedBy);
@@ -83,8 +95,14 @@ public class PromotionCommandService implements PromotionCommandPort {
 
 	@Override
 	public PromotionId rollbackPromotion(PromotionId promotionId, Actor rolledBackBy) {
+		return rollbackPromotion(promotionId, rolledBackBy, null);
+	}
+
+	@Override
+	@Transactional
+	public PromotionId rollbackPromotion(PromotionId promotionId, Actor rolledBackBy, String reason) {
 		Promotion promotion = load(promotionId);
-		promotion.rollback(rolledBackBy);
+		promotion.rollback(rolledBackBy, reason);
 		repository.save(promotion);
 		publishEvents(promotion);
 		return promotion.id();
@@ -92,8 +110,14 @@ public class PromotionCommandService implements PromotionCommandPort {
 
 	@Override
 	public PromotionId cancelPromotion(PromotionId promotionId, Actor cancelledBy) {
+		return cancelPromotion(promotionId, cancelledBy, null);
+	}
+
+	@Override
+	@Transactional
+	public PromotionId cancelPromotion(PromotionId promotionId, Actor cancelledBy, String reason) {
 		Promotion promotion = load(promotionId);
-		promotion.cancel(cancelledBy);
+		promotion.cancel(cancelledBy, reason);
 		repository.save(promotion);
 		publishEvents(promotion);
 		return promotion.id();

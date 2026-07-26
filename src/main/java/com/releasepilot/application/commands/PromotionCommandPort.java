@@ -24,5 +24,9 @@ public interface PromotionCommandPort {
 
 	PromotionId rollbackPromotion(PromotionId promotionId, Actor rolledBackBy);
 
+	PromotionId rollbackPromotion(PromotionId promotionId, Actor rolledBackBy, String reason);
+
 	PromotionId cancelPromotion(PromotionId promotionId, Actor cancelledBy);
+
+	PromotionId cancelPromotion(PromotionId promotionId, Actor cancelledBy, String reason);
 }

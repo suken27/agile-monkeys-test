@@ -11,6 +11,7 @@ import com.releasepilot.domain.promotion.Role;
 import com.releasepilot.domain.promotion.Version;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.stereotype.Repository;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -24,11 +25,8 @@ import java.util.UUID;
  * (see {@code db/migration/V1__create_promotions_table.sql}). Maps rows to/from {@link Promotion}
  * explicitly with plain {@link JdbcTemplate} rather than a Spring Data JPA/JDBC entity, so the
  * aggregate's own constructors/factories stay in full control of its invariants — see SPECS.md §11.
- *
- * <p>Not yet registered as a Spring bean: nothing in the application context currently depends on
- * {@link PromotionRepositoryPort}, so wiring this in is deferred to when the command handlers are
- * connected to the HTTP layer. Until then it is exercised directly by its integration test.
  */
+@Repository
 public class JdbcPromotionRepository implements PromotionRepositoryPort {
 
 	private static final RowMapper<Promotion> ROW_MAPPER = JdbcPromotionRepository::mapRow;

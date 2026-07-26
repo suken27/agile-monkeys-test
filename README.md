@@ -61,20 +61,22 @@ java -jar target/releasepilot-0.0.1-SNAPSHOT.jar
 ./mvnw test
 ```
 
-This runs the unit test suite only (aggregate + command-service tests) — it needs no database,
-Docker, or other infrastructure, and finishes in a few seconds. Persistence integration tests
+This runs the unit test suite only (aggregate, command-service, query-service, and
+`@WebMvcTest` controller/error-mapping tests) — it needs no database, Docker, or other
+infrastructure, and finishes in a few seconds. Persistence and full-context integration tests
 are excluded by naming convention (`*Test` vs `*IT`, see below).
 
-### Persistence integration tests
+### Integration tests
 
-`JdbcPromotionRepositoryIT` (`src/test/java/.../infrastructure/persistence/`) exercises
-`JdbcPromotionRepository` against a real, disposable PostgreSQL instance started automatically by
-[Testcontainers](https://testcontainers.com/) — no manual database setup is required, but
-**Docker must be installed and running** (the container image `postgres:16-alpine` is pulled and
-started/stopped per test run).
+Every `*IT` class (`src/test/java/.../infrastructure/persistence/`,
+`.../infrastructure/persistence/readmodel/`, `.../infrastructure/queue/`, and
+`ReleasePilotApplicationIT`) runs against a real, disposable PostgreSQL instance (and, for the
+queue tests, RabbitMQ too) started automatically by [Testcontainers](https://testcontainers.com/)
+— no manual setup is required, but **Docker must be installed and running** (the container
+images are pulled and started/stopped per test run).
 
-It's named `*IT` rather than `*Test` specifically so the default `./mvnw test` (Surefire) skips
-it; only Maven's `verify` lifecycle phase (bound to the Failsafe plugin) runs it:
+They're named `*IT` rather than `*Test` specifically so the default `./mvnw test` (Surefire)
+skips them; only Maven's `verify` lifecycle phase (bound to the Failsafe plugin) runs them:
 
 ```bash
 ./mvnw verify
@@ -86,14 +88,15 @@ To run just the integration tests without the rest of the `verify` lifecycle:
 ./mvnw failsafe:integration-test
 ```
 
-What it proves: the adapter's SQL round-trips every field of a `Promotion` (including the
-optional `fromEnvironment`/`approvedBy`), the aggregate can keep applying its own guarded
-transitions across a save → reload cycle, and the two invariant-scoped queries
-(`findActivePromotionsForTarget`, `findLastCompletedEnvironment`) filter correctly at the SQL
-level — including a couple of tests that replay the exact repository-then-aggregate call sequence
-`PromotionCommandService` uses, so a passing run means the adapter and the domain layer genuinely
-agree on how a `Promotion` invariant is enforced across a reload, not just that each side works in
-isolation.
+What they prove: `JdbcPromotionRepositoryIT` shows the write-side adapter's SQL round-trips every
+field of a `Promotion` and the two invariant-scoped queries filter correctly, replaying the exact
+call sequence `PromotionCommandService` uses. `JdbcPromotionReadModelRepositoryIT` seeds the
+read-model tables directly (standing in for the projector consumer described below) and asserts
+the three query shapes (§7) — the promotion-detail history ordering, the "always three
+environments" defaulting, and the paged/ordered promotion history — are correct at the SQL level.
+`ReleasePilotApplicationIT` boots the entire Spring context against a real database, proving every
+`@Repository`/`@Service`/`@Component`/`@RestController` bean introduced for the HTTP layer
+actually wires together.
 
 ## CI/CD
 
@@ -161,11 +164,13 @@ port, is implemented by `JdbcPromotionRepository`
 aggregate's own constructors stay in control of its invariants rather than a
 framework reconstructing it via reflection (see SPECS.md §11). The schema
 lives in `db/migration/V1__create_promotions_table.sql`, applied by Flyway.
-It is not yet wired into the Spring context — nothing in the application
-depends on a live `DataSource` until the HTTP layer is connected to the
-command handlers, so `ReleasePilotApplication` excludes
-`DataSourceAutoConfiguration` for now and the adapter is exercised directly
-by `JdbcPromotionRepositoryIT` (see "Persistence integration tests" above).
+It is registered as a `@Repository` bean now that the HTTP layer is connected
+to the command handlers (see "HTTP API" below) and is also still exercised
+directly by `JdbcPromotionRepositoryIT` (see "Integration tests" above). Note
+that `src/test/resources/application.yml` excludes `DataSourceAutoConfiguration`
+for plain `@SpringBootTest`/`@WebMvcTest` unit tests, since those never touch a
+database; `ReleasePilotApplicationIT` overrides that exclusion to boot the
+full context against a real Testcontainers Postgres instance instead.
 
 ## Event publishing (transactional outbox)
 
@@ -202,22 +207,76 @@ Delivery to the broker is a second, decoupled step: `OutboxRelay`
 RabbitMQ exchange via Spring AMQP's `RabbitTemplate`, and marks the row sent.
 Using a fanout exchange means the relay never needs to know which or how many
 consumers exist — each future consumer (audit log, read-model projector,
-notifications, ...) declares and binds its own queue. Like
-`JdbcPromotionRepository`, neither `OutboxEventPublisher` nor `OutboxRelay` is
-wired into the Spring context yet; both are exercised directly by
-`OutboxEventPublisherIT` and `OutboxRelayIT` (Testcontainers Postgres +
-RabbitMQ — the latter proves an event genuinely survives the outbox → queue
-hop and isn't redelivered on a second relay pass).
+notifications, ...) declares and binds its own queue. `OutboxEventPublisher`
+is now registered as a `@Component` bean (the command handlers need it), but
+`OutboxRelay` itself is intentionally not yet scheduled/wired into the Spring
+context — actually polling and delivering to a live broker is part of the
+async-processing/consumers work (SPECS §8), not the HTTP command/query layer
+this branch adds. Both are still exercised directly by `OutboxEventPublisherIT`
+and `OutboxRelayIT` (Testcontainers Postgres + RabbitMQ — the latter proves an
+event genuinely survives the outbox → queue hop and isn't redelivered on a
+second relay pass).
+
+## HTTP API (commands and queries)
+
+The nine endpoints from SPECS.md §10 are wired now:
+
+| Method | Path | Command/Query |
+|---|---|---|
+| POST | `/promotions` | `RequestPromotion` |
+| POST | `/promotions/:id/approve` | `ApprovePromotion` |
+| POST | `/promotions/:id/start` | `StartDeployment` |
+| POST | `/promotions/:id/complete` | `CompletePromotion` |
+| POST | `/promotions/:id/rollback` | `RollbackPromotion` (optional `reason`) |
+| POST | `/promotions/:id/cancel` | `CancelPromotion` (optional `reason`) |
+| GET | `/promotions/:id` | promotion detail |
+| GET | `/applications/:id/status` | per-environment status |
+| GET | `/applications/:id/promotions` | paged promotion history (`?page=&pageSize=`) |
+
+`PromotionCommandController` and `PromotionQueryController` (`api/controllers/`) are thin: they
+parse the request, translate it into the arguments `PromotionCommandPort`/`PromotionQueryPort`
+need (`api/dto/`), and delegate — no business logic lives in either class. Every documented
+business-rule violation, plus "not found" and malformed-input cases, is translated to a 4xx by
+`ErrorMapping` (`api/ErrorMapping.java`), a `@RestControllerAdvice` that switches exhaustively over
+the sealed `DomainError` hierarchy (SPECS §10/§11) — adding a new `DomainError` subtype without
+extending that switch fails the build, not a request at runtime.
+
+The actor concept (SPECS §15) is a trusted `{ userId, role }` object on every write request body
+(`ActorRequest`), translated to the domain's `Actor` value object at the API boundary.
+
+On the write side, `PromotionCommandPort` gained a reason-carrying overload for
+`rollbackPromotion`/`cancelPromotion` — SPECS §4/§5 lists `reason?` as part of both commands'
+input and their events' payload, so `Promotion.rollback`/`cancel` now take an optional `reason`
+too (an additive overload; existing call sites without a reason are unaffected). Every command
+handler method is `@Transactional`, so the aggregate's persisted state and its outbox row commit
+or roll back together, per SPECS §5.1.
+
+On the read side, `PromotionQueryPort`/`PromotionQueryService` (`application/queries/`) are thin
+pass-throughs to `PromotionReadModelPort`, backed by `JdbcPromotionReadModelRepository`
+(`infrastructure/persistence/readmodel/`) and the `promotion_detail`, `promotion_detail_history`,
+`application_environment_status`, and `promotion_history` tables
+(`db/migration/V3__create_read_model_tables.sql`) — separate from, and never joined against, the
+write-side `promotions` table, per CQRS. **These tables are not yet populated by anything**: the
+read-model projector consumer that would fill them by consuming events off the queue is SPECS §8
+work, not yet built. Until then, `GET` requests against a fresh database correctly return 404 /
+empty results — a data-population gap, not a bug in the query path, which is why
+`JdbcPromotionReadModelRepositoryIT` seeds rows directly (standing in for the future projector) to
+prove the queries themselves are correct.
+
+`DeploymentPort` (SPECS §6) now has its in-memory stub, `InMemoryDeploymentAdapter`
+(`infrastructure/adapters/inmemory/`), registered as a `@Component` — `StartDeployment` needs a
+live bean for the app context to boot. `IssueTrackerPort` and `NotificationPort` still have no
+adapter; nothing on the command or query path calls them yet.
 
 ## Project structure
 
 ```
 src/main/java/com/releasepilot/
   domain/          # Promotion aggregate, value objects, invariants, ports
-  application/      # Command and query handlers
-  infrastructure/    # Persistence, in-memory adapters, message queue
-  consumers/         # Async event consumers (audit log, projections, notifications)
-  api/                # Thin REST controllers
+  application/      # Command and query handlers, read-model port, query DTOs
+  infrastructure/    # Persistence (write + read model), in-memory adapters, message queue
+  consumers/         # Async event consumers (audit log, projections, notifications) — not yet built
+  api/                # Thin REST controllers, request/response DTOs, error mapping
 src/main/resources/
   db/migration/       # Flyway SQL migrations
   application.yml
