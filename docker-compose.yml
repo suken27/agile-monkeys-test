@@ -110,6 +110,25 @@ services:
       SPRING_RABBITMQ_USERNAME: releasepilot
       SPRING_RABBITMQ_PASSWORD: releasepilot
 
+  release-notes-agent-consumer:
+    image: ghcr.io/suken27/agile-monkeys-test:latest
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: release-notes-agent-consumer
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/releasepilot
+      SPRING_DATASOURCE_USERNAME: releasepilot
+      SPRING_DATASOURCE_PASSWORD: releasepilot
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: releasepilot
+      SPRING_RABBITMQ_PASSWORD: releasepilot
+
 volumes:
   postgres-data:
   rabbitmq-data:
