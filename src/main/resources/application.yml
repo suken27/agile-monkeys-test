@@ -25,3 +25,11 @@ spring:
       on-profile: outbox-relay
   main:
     web-application-type: none
+
+---
+spring:
+  config:
+    activate:
+      on-profile: release-notes-agent-consumer
+  main:
+    web-application-type: none

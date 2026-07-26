@@ -266,10 +266,37 @@ prove the queries themselves are correct.
 All three output ports from SPECS §6 now have in-memory stubs registered as `@Component` beans in
 `infrastructure/adapters/inmemory/`: `InMemoryDeploymentAdapter` (called synchronously by
 `StartDeployment`, needed for the app context to boot), `InMemoryIssueTrackerAdapter` (seeded/keyed
-by `(applicationId, version)`), and `InMemoryNotificationAdapter`. The latter two just have their
-stub bean and unit tests for now — nothing on the command/query path or async consumer side calls
-either yet; the Notification consumer that would call `NotificationPort.notify(...)` on
-terminal-state events (SPECS §8.3) is still to be built.
+by `(applicationId, version)`, called by the release-notes agent consumer below), and
+`InMemoryNotificationAdapter`. The latter still just has its stub bean and unit test for now — the
+Notification consumer that would call `NotificationPort.notify(...)` on terminal-state events
+(SPECS §8.3) is still to be built.
+
+## AI release-notes agent (optional, SPECS §9)
+
+`ReleaseNotesAgentConsumer` (`consumers/`) is the one consumer triggered by a single event type:
+every event other than `PromotionApproved` delivered off the `promotion.events` fanout exchange is a
+no-op. On `PromotionApproved` it drives a genuine tool-calling loop rather than a single completion —
+repeatedly asking `ReleaseNotesLlmPort` (`domain/ports/`) for the next `AgentDecision` and executing
+whichever tool it names, appending the result to an `AgentContext` transcript and handing the updated
+context back for the next decision, until the LLM returns `Done` instead of another tool call:
+
+1. `get_linked_work_items` → `IssueTrackerPort`.
+2. If that first fetch came back empty, the mocked model decides to re-fetch once before giving up —
+   the "needs another tool call" branch SPECS §9 calls out — rather than always re-fetching or never
+   retrying.
+3. `get_promotion_history` → `PromotionReadModelPort`, for "since last release" framing.
+4. `save_release_notes` — persists the draft to the `release_notes` table
+   (`db/migration/V5__create_release_notes_table.sql`), upserted on `promotion_id` (a promotion is
+   approved at most once) so redelivery under the outbox's at-least-once guarantee never conflicts.
+
+`ReleaseNotesLlmPort` is implemented by `MockedReleaseNotesLlmAdapter`
+(`infrastructure/adapters/inmemory/`): genuinely mocked (deterministic canned decisions keyed off the
+tool results seen so far), but the consumer round-trips through it exactly as it would a real
+chat-completions API with tool-calling. Like the other consumers, `ReleaseNotesAgentConsumer` itself
+is plain Java with no Spring dependency (SPECS §14.3); `ReleaseNotesAgentConfig`/
+`ReleaseNotesAgentListener` (`infrastructure/queue/`) wire it up and bind its queue only under the
+`release-notes-agent-consumer` Spring profile, mirroring the audit-log and read-model-projector
+consumers' deploy-as-its-own-process shape.
 
 ## Project structure
 
@@ -278,7 +305,7 @@ src/main/java/com/releasepilot/
   domain/          # Promotion aggregate, value objects, invariants, ports
   application/      # Command and query handlers, read-model port, query DTOs
   infrastructure/    # Persistence (write + read model), in-memory adapters, message queue
-  consumers/         # Async event consumers (audit log, read-model projections); notification consumer not yet built
+  consumers/         # Async event consumers (audit log, read-model projections, release-notes agent); notification consumer not yet built
   api/                # Thin REST controllers, request/response DTOs, error mapping
 src/main/resources/
   db/migration/       # Flyway SQL migrations
