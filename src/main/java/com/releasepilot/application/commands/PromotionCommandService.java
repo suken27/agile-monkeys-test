@@ -1,29 +1,41 @@
 package com.releasepilot.application.commands;
 
 import com.releasepilot.domain.ports.DeploymentPort;
+import com.releasepilot.domain.ports.DeploymentRef;
+import com.releasepilot.domain.ports.EventPublisherPort;
 import com.releasepilot.domain.ports.PromotionRepositoryPort;
 import com.releasepilot.domain.promotion.Actor;
 import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.DomainEvent;
 import com.releasepilot.domain.promotion.Environment;
 import com.releasepilot.domain.promotion.Promotion;
 import com.releasepilot.domain.promotion.PromotionId;
 import com.releasepilot.domain.promotion.Version;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Implementation of the {@link PromotionCommandPort} — the only port implemented in this layer.
  * Loads the sibling promotions each invariant needs (§3.4) through {@link PromotionRepositoryPort},
  * then lets the {@link Promotion} aggregate itself decide and guard every transition.
+ *
+ * <p>After every command persists the aggregate's new state, the handler pulls the event(s) that
+ * transition recorded on the aggregate and publishes them through {@link EventPublisherPort}
+ * (SPECS §5.1) — the state write and the publish call happen back-to-back in the same handler
+ * invocation so the outbox adapter backing the port can enlist both in one DB transaction.
  */
 public class PromotionCommandService implements PromotionCommandPort {
 
 	private final DeploymentPort deploymentPort;
 	private final PromotionRepositoryPort repository;
+	private final EventPublisherPort eventPublisher;
 
-	public PromotionCommandService(DeploymentPort deploymentPort, PromotionRepositoryPort repository) {
+	public PromotionCommandService(
+			DeploymentPort deploymentPort, PromotionRepositoryPort repository, EventPublisherPort eventPublisher) {
 		this.deploymentPort = deploymentPort;
 		this.repository = repository;
+		this.eventPublisher = eventPublisher;
 	}
 
 	@Override
@@ -36,6 +48,7 @@ public class PromotionCommandService implements PromotionCommandPort {
 				PromotionId.random(), applicationId, version, lastCompleted, targetEnvironment, requestedBy,
 				existingForTarget);
 		repository.save(promotion);
+		publishEvents(promotion);
 		return promotion.id();
 	}
 
@@ -44,6 +57,7 @@ public class PromotionCommandService implements PromotionCommandPort {
 		Promotion promotion = load(promotionId);
 		promotion.approve(approvedBy);
 		repository.save(promotion);
+		publishEvents(promotion);
 		return promotion.id();
 	}
 
@@ -51,8 +65,10 @@ public class PromotionCommandService implements PromotionCommandPort {
 	public PromotionId startDeployment(PromotionId promotionId, Actor startedBy) {
 		Promotion promotion = load(promotionId);
 		promotion.startDeployment(startedBy);
+		DeploymentRef deploymentRef =
+				deploymentPort.trigger(promotion.applicationId(), promotion.version(), promotion.targetEnvironment());
 		repository.save(promotion);
-		deploymentPort.trigger(promotion.applicationId(), promotion.version(), promotion.targetEnvironment());
+		publishEvents(promotion, Map.of("deploymentRef", deploymentRef.value()));
 		return promotion.id();
 	}
 
@@ -61,6 +77,7 @@ public class PromotionCommandService implements PromotionCommandPort {
 		Promotion promotion = load(promotionId);
 		promotion.complete(completedBy);
 		repository.save(promotion);
+		publishEvents(promotion);
 		return promotion.id();
 	}
 
@@ -69,6 +86,7 @@ public class PromotionCommandService implements PromotionCommandPort {
 		Promotion promotion = load(promotionId);
 		promotion.rollback(rolledBackBy);
 		repository.save(promotion);
+		publishEvents(promotion);
 		return promotion.id();
 	}
 
@@ -77,11 +95,23 @@ public class PromotionCommandService implements PromotionCommandPort {
 		Promotion promotion = load(promotionId);
 		promotion.cancel(cancelledBy);
 		repository.save(promotion);
+		publishEvents(promotion);
 		return promotion.id();
 	}
 
 	private Promotion load(PromotionId promotionId) {
 		return repository.findById(promotionId)
 				.orElseThrow(() -> new PromotionNotFoundException(promotionId));
+	}
+
+	private void publishEvents(Promotion promotion) {
+		promotion.pullDomainEvents().forEach(eventPublisher::publish);
+	}
+
+	/** Enriches every event pulled from this transition with {@code extraPayload} before publishing. */
+	private void publishEvents(Promotion promotion, Map<String, Object> extraPayload) {
+		for (DomainEvent event : promotion.pullDomainEvents()) {
+			eventPublisher.publish(event.withPayload(extraPayload));
+		}
 	}
 }
