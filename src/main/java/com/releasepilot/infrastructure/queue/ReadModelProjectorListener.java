@@ -5,6 +5,7 @@ import com.releasepilot.domain.promotion.ApplicationId;
 import com.releasepilot.domain.promotion.DomainEvent;
 import com.releasepilot.domain.promotion.PromotionId;
 import org.springframework.amqp.core.ExchangeTypes;
+import org.springframework.amqp.rabbit.annotation.Argument;
 import org.springframework.amqp.rabbit.annotation.Exchange;
 import org.springframework.amqp.rabbit.annotation.Queue;
 import org.springframework.amqp.rabbit.annotation.QueueBinding;
@@ -45,7 +46,13 @@ public class ReadModelProjectorListener {
 	}
 
 	@RabbitListener(bindings = @QueueBinding(
-			value = @Queue(name = QUEUE_NAME, durable = "true"),
+			value = @Queue(
+					name = QUEUE_NAME,
+					durable = "true",
+					arguments = {
+							@Argument(name = "x-dead-letter-exchange", value = OutboxRelay.DEAD_LETTER_EXCHANGE),
+							@Argument(name = "x-dead-letter-routing-key", value = QUEUE_NAME)
+					}),
 			exchange = @Exchange(name = OutboxRelay.PROMOTION_EVENTS_EXCHANGE, type = ExchangeTypes.FANOUT)))
 	public void onMessage(byte[] body) {
 		Map<String, Object> envelope = objectMapper.readValue(body, new TypeReference<Map<String, Object>>() {

@@ -1,6 +1,16 @@
 spring:
   application:
     name: ReleasePilot
+  rabbitmq:
+    listener:
+      simple:
+        retry:
+          enabled: true
+          max-retries: 5
+          initial-interval: 1s
+          multiplier: 2.0
+          max-interval: 30s
+        default-requeue-rejected: false
 
 ---
 spring:

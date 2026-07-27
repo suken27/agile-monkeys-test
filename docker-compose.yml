@@ -1,3 +1,7 @@
+x-releasepilot-build: &releasepilot-build
+  context: .
+  dockerfile: Dockerfile
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -35,7 +39,8 @@ services:
 
   app:
     image: ghcr.io/suken27/agile-monkeys-test:latest
-    pull_policy: always
+    build: *releasepilot-build
+    pull_policy: missing
     restart: unless-stopped
     depends_on:
       postgres:
@@ -55,7 +60,8 @@ services:
 
   read-model-projector:
     image: ghcr.io/suken27/agile-monkeys-test:latest
-    pull_policy: always
+    build: *releasepilot-build
+    pull_policy: missing
     restart: unless-stopped
     depends_on:
       postgres:
@@ -74,7 +80,8 @@ services:
 
   audit-log-consumer:
     image: ghcr.io/suken27/agile-monkeys-test:latest
-    pull_policy: always
+    build: *releasepilot-build
+    pull_policy: missing
     restart: unless-stopped
     depends_on:
       postgres:
@@ -93,7 +100,8 @@ services:
 
   outbox-relay:
     image: ghcr.io/suken27/agile-monkeys-test:latest
-    pull_policy: always
+    build: *releasepilot-build
+    pull_policy: missing
     restart: unless-stopped
     depends_on:
       postgres:
@@ -112,7 +120,8 @@ services:
 
   release-notes-agent-consumer:
     image: ghcr.io/suken27/agile-monkeys-test:latest
-    pull_policy: always
+    build: *releasepilot-build
+    pull_policy: missing
     restart: unless-stopped
     depends_on:
       postgres:

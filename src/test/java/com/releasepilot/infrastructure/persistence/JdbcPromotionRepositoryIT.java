@@ -215,4 +215,23 @@ class JdbcPromotionRepositoryIT {
 				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, existingForTarget))
 				.isInstanceOf(DuplicatePromotionInProgressError.class);
 	}
+
+	/**
+	 * Simulates the race {@code uq_promotions_active_target} backstops: two concurrent
+	 * {@code RequestPromotion} calls can both pass the application layer's check-then-act (each
+	 * sees an empty {@code existingForTarget} list) before either has saved, so the aggregate
+	 * itself never sees a conflict. The database must still refuse the second insert.
+	 */
+	@Test
+	void savingASecondConcurrentlyRequestedPromotionForTheSameTargetViolatesTheUniqueIndex() {
+		Promotion first = Promotion.request(
+				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of());
+		Promotion racingSecond = Promotion.request(
+				PromotionId.random(), applicationId, version, null, Environment.DEV, requester, List.of());
+
+		repository.save(first);
+
+		assertThatThrownBy(() -> repository.save(racingSecond))
+				.isInstanceOf(DuplicatePromotionInProgressError.class);
+	}
 }

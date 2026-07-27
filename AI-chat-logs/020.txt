@@ -1,0 +1,979 @@
+
+SPECS.md
+the @SPECS.md document is outdated for section 9, this should be the original description for that part:
+
+When a promotion reaches Approved, trigger an agent that drafts release notes for it. Build a real tool-calling loop, not a single prompt, with an agent framework if your stack has one or hand-rolled if it doesn't. A mocked LLM backend is perfectly fine, we evaluate structure, not live output. Doing this won't make up for a weak core, but attempting it well, even partially, is a strong signal.
+
+GetWorkItems(promotionId) → linked issue stubs
+AskClarification(workItemId, question)
+FlagBreakingChange(workItemId, reason)
+SubmitReleaseNotes(draft) → persists the draft
+
+Update the @SPECS.md  and the project to reflect it
+I'll first look at the existing release-notes agent implementation to understand what's there before updating both the spec and the code.
+
+Bash Find release notes agent related files
+IN
+find /home/juanjo/git/agile-monkeys-test/src -iname "*ReleaseNotes*" -o -iname "*Agent*" | sort
+
+OUT
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/consumers/ReleaseNotesAgentConsumer.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/AgentContext.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/AgentDecision.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/domain/ports/ReleaseNotesLlmPort.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapter.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/ReleaseNotesAgentConfig.java
+/home/juanjo/git/agile-monkeys-test/src/main/java/com/releasepilot/infrastructure/queue/ReleaseNotesAgentListener.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/consumers/ReleaseNotesAgentConsumerIT.java
+/home/juanjo/git/agile-monkeys-test/src/test/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapterTest.java
+Read ReleaseNotesAgentConsumer.java
+Read AgentContext.java
+Read AgentDecision.java
+Read ReleaseNotesLlmPort.java
+Read MockedReleaseNotesLlmAdapter.java
+Bash Show ports and WorkItem
+IN
+find src/main/java/com/releasepilot/domain/ports -iname "*.java" | xargs -I{} echo {} && echo "---" && cat src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java && echo "---WorkItem---" && find src -iname "WorkItem.java" -exec cat {} \;
+
+OUT
+src/main/java/com/releasepilot/domain/ports/ReleaseNotesLlmPort.java
+src/main/java/com/releasepilot/domain/ports/WorkItem.java
+src/main/java/com/releasepilot/domain/ports/DeploymentPort.java
+src/main/java/com/releasepilot/domain/ports/DeploymentRef.java
+src/main/java/com/releasepilot/domain/ports/PromotionRepositoryPort.java
+src/main/java/com/releasepilot/domain/ports/EventPublisherPort.java
+src/main/java/com/releasepilot/domain/ports/AgentContext.java
+src/main/java/com/releasepilot/domain/ports/AgentDecision.java
+src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java
+src/main/java/com/releasepilot/domain/ports/NotificationPort.java
+src/main/java/com/releasepilot/domain/ports/ToolCallRecord.java
+---
+package com.releasepilot.domain.ports;
+
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Version;
+
+import java.util.List;
+
+/**
+ * Output port: a capability the domain requires of the outside world to fetch the work items
+ * linked to an application version (e.g. for the promotion detail query or the release-notes
+ * agent). Implemented by an infrastructure adapter.
+ */
+public interface IssueTrackerPort {
+
+	List<WorkItem> getLinkedWorkItems(ApplicationId applicationId, Version version);
+}
+---WorkItem---
+package com.releasepilot.domain.ports;
+
+/** A work item (ticket) linked to an application version, as returned by {@link IssueTrackerPort}. */
+public record WorkItem(String id, String title, String url) {
+}
+Read ToolCallRecord.java
+Read ReleaseNotesAgentConfig.java
+Read ReleaseNotesAgentListener.java
+Bash List migrations and find release_notes table def
+IN
+find src/main/resources/db/migration -iname "*.sql" | sort && echo --- && grep -rl "release_notes" src/main/resources/db/migration
+
+OUT
+src/main/resources/db/migration/V1__create_promotions_table.sql
+src/main/resources/db/migration/V2__create_outbox_events_table.sql
+src/main/resources/db/migration/V3__create_read_model_tables.sql
+src/main/resources/db/migration/V4__create_audit_log_table.sql
+src/main/resources/db/migration/V5__create_release_notes_table.sql
+src/main/resources/db/migration/V6__add_unique_index_on_active_promotion_target.sql
+---
+src/main/resources/db/migration/V5__create_release_notes_table.sql
+Read V5__create_release_notes_table.sql
+Read ReleaseNotesAgentConsumerIT.java
+Read MockedReleaseNotesLlmAdapterTest.java
+Bash Find all usages of IssueTrackerPort
+IN
+grep -rln "IssueTrackerPort" src/main src/test && echo --- && grep -rn "getLinkedWorkItems" src/main src/test
+
+OUT
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapter.java
+src/main/java/com/releasepilot/infrastructure/queue/ReleaseNotesAgentConfig.java
+src/main/java/com/releasepilot/consumers/ReleaseNotesAgentConsumer.java
+src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java
+src/main/java/com/releasepilot/domain/ports/WorkItem.java
+---
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapter.java:25:	public List<WorkItem> getLinkedWorkItems(ApplicationId applicationId, Version version) {
+src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java:15:	List<WorkItem> getLinkedWorkItems(ApplicationId applicationId, Version version);
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapterTest.java:18:		assertThat(adapter.getLinkedWorkItems(ApplicationId.random(), new Version("1.0.0"))).isEmpty();
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapterTest.java:28:		assertThat(adapter.getLinkedWorkItems(applicationId, version)).containsExactly(workItem);
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapterTest.java:36:		assertThat(adapter.getLinkedWorkItems(applicationId, new Version("2.0.0"))).isEmpty();
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapter.java:36:			return getLinkedWorkItems(context);
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapter.java:39:			return getLinkedWorkItems(context);
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapter.java:52:	private AgentDecision getLinkedWorkItems(AgentContext context) {
+src/main/java/com/releasepilot/consumers/ReleaseNotesAgentConsumer.java:70:					issueTracker.getLinkedWorkItems(context.applicationId(), context.version());
+Read InMemoryIssueTrackerAdapter.java
+Bash
+IN
+find src -iname "*IssueTracker*"; echo ---; cat src/test/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapterTest.java
+
+OUT
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapter.java
+src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapterTest.java
+---
+package com.releasepilot.infrastructure.adapters.inmemory;
+
+import com.releasepilot.domain.ports.WorkItem;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Version;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class InMemoryIssueTrackerAdapterTest {
+
+	private final InMemoryIssueTrackerAdapter adapter = new InMemoryIssueTrackerAdapter();
+
+	@Test
+	void returnsAnEmptyListWhenNothingHasBeenSeeded() {
+		assertThat(adapter.getLinkedWorkItems(ApplicationId.random(), new Version("1.0.0"))).isEmpty();
+	}
+
+	@Test
+	void returnsTheSeededWorkItemsForTheExactApplicationAndVersion() {
+		ApplicationId applicationId = ApplicationId.random();
+		Version version = new Version("1.0.0");
+		WorkItem workItem = new WorkItem("TICKET-1", "Fix the thing", "https://tracker.example/TICKET-1");
+		adapter.seed(applicationId, version, List.of(workItem));
+
+		assertThat(adapter.getLinkedWorkItems(applicationId, version)).containsExactly(workItem);
+	}
+
+	@Test
+	void doesNotReturnWorkItemsSeededForADifferentVersion() {
+		ApplicationId applicationId = ApplicationId.random();
+		adapter.seed(applicationId, new Version("1.0.0"), List.of(new WorkItem("TICKET-1", "Fix", "url")));
+
+		assertThat(adapter.getLinkedWorkItems(applicationId, new Version("2.0.0"))).isEmpty();
+	}
+}
+Bash
+IN
+grep -rn "new WorkItem(" src/main src/test; echo ---; grep -rln "WorkItem" src/main src/test
+
+OUT
+src/test/java/com/releasepilot/consumers/ReleaseNotesAgentConsumerIT.java:103:				new WorkItem("TICKET-1", "Fix login bug", "https://issues.example.com/TICKET-1")));
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapterTest.java:25:		WorkItem workItem = new WorkItem("TICKET-1", "Fix the thing", "https://tracker.example/TICKET-1");
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapterTest.java:34:		adapter.seed(applicationId, new Version("1.0.0"), List.of(new WorkItem("TICKET-1", "Fix", "url")));
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapterTest.java:70:		WorkItem workItem = new WorkItem("TICKET-1", "Fix the thing", "https://tracker.example/TICKET-1");
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapterTest.java:82:		WorkItem workItem = new WorkItem("TICKET-1", "Fix the thing", "https://tracker.example/TICKET-1");
+---
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapter.java
+src/main/java/com/releasepilot/domain/ports/IssueTrackerPort.java
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapter.java
+src/main/java/com/releasepilot/domain/ports/WorkItem.java
+src/main/java/com/releasepilot/consumers/ReleaseNotesAgentConsumer.java
+src/test/java/com/releasepilot/consumers/ReleaseNotesAgentConsumerIT.java
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/InMemoryIssueTrackerAdapterTest.java
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapterTest.java
+Bash
+IN
+grep -rln "ToolCallRecord\|AgentContext\|AgentDecision" src/main src/test
+
+OUT
+src/main/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapter.java
+src/main/java/com/releasepilot/domain/ports/AgentDecision.java
+src/main/java/com/releasepilot/domain/ports/AgentContext.java
+src/main/java/com/releasepilot/domain/ports/ToolCallRecord.java
+src/main/java/com/releasepilot/consumers/ReleaseNotesAgentConsumer.java
+src/main/java/com/releasepilot/domain/ports/ReleaseNotesLlmPort.java
+src/test/java/com/releasepilot/infrastructure/adapters/inmemory/MockedReleaseNotesLlmAdapterTest.java
+Bash
+IN
+grep -n "get_linked_work_items\|get_promotion_history\|save_release_notes\|GetWorkItems\|AskClarification\|FlagBreakingChange\|SubmitReleaseNotes\|release-notes\|Release-Notes\|Release Notes" README.md | head -50
+
+OUT
+62:`read-model-projector`, `audit-log-consumer`, `outbox-relay`, `release-notes-agent-consumer`),
+296:by `(applicationId, version)`, called by the release-notes agent consumer below), and
+301:## AI release-notes agent (optional, SPECS §9)
+310:1. `get_linked_work_items` → `IssueTrackerPort`.
+314:3. `get_promotion_history` → `PromotionReadModelPort`, for "since last release" framing.
+315:4. `save_release_notes` — persists the draft to the `release_notes` table
+325:`release-notes-agent-consumer` Spring profile, mirroring the audit-log and read-model-projector
+335:  consumers/         # Async event consumers (audit log, read-model projections, release-notes agent); notification consumer not yet built
+Let me see the full README section on the release-notes agent so I can update it consistently.
+
+Read README.md (lines 281-325)
+Read README.md (lines 325-339)
+Update Todos
+
+Rewrite SPECS.md §9 with the new agent description and 4-tool contract
+
+Update ReleaseNotesLlmPort tool constants + javadoc
+
+Add description field to WorkItem; add answerClarification to IssueTrackerPort + in-memory adapter
+
+Update ToolCallRecord/AgentContext to carry tool arguments
+
+Rewrite MockedReleaseNotesLlmAdapter for GetWorkItems/AskClarification/FlagBreakingChange/SubmitReleaseNotes loop
+
+Update ReleaseNotesAgentConsumer executeTool switch
+
+Update unit/integration tests for the new tool set
+
+Update README.md AI release-notes agent section
+
+Compile and run affected tests
+Now let's start with SPECS.md §9.
+
+Edit SPECS.md
+Added 15 lines
+Edit SPECS.md
+Modified
+SPECS.md is done. Now let's implement the code changes, starting with the port layer.
+
+Edit ReleaseNotesLlmPort.java
+Added 4 lines
+Edit WorkItem.java
+Added 5 lines
+Edit IssueTrackerPort.java
+Added 4 lines
+Now the ToolCallRecord and AgentContext:
+
+Edit ToolCallRecord.java
+Added 7 lines
+Edit AgentContext.java
+Added 1 line
+Expected — I still need to update the withToolResult method body. Let me fix that now.
+
+Edit AgentContext.java
+Added 1 line
+Now let's update the InMemoryIssueTrackerAdapter to implement answerClarification:
+
+Edit InMemoryIssueTrackerAdapter.java
+Added 13 lines
+Now the core logic: MockedReleaseNotesLlmAdapter.
+
+Write MockedReleaseNotesLlmAdapter.java
+139 lines
+package com.releasepilot.infrastructure.adapters.inmemory;
+
+import com.releasepilot.domain.ports.AgentContext;
+import com.releasepilot.domain.ports.AgentDecision;
+import com.releasepilot.domain.ports.ReleaseNotesLlmPort;
+import com.releasepilot.domain.ports.ToolCallRecord;
+import com.releasepilot.domain.ports.WorkItem;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * In-memory stub adapter for {@link ReleaseNotesLlmPort} (SPECS §9). A genuinely mocked LLM
+ * backend: deterministic canned decisions keyed off the tool results seen so far in
+ * {@link AgentContext#transcript()}, rather than a single completion — it walks the exact loop
+ * SPECS §9 describes:
+ *
+ * <ol>
+ *   <li>fetch the promotion's linked work items with {@code GetWorkItems};
+ *   <li>for any work item too thin to summarize (blank description), ask a clarifying question
+ *       with {@code AskClarification} — one item at a time, the "decides it needs more context"
+ *       branch the spec calls out;
+ *   <li>for any work item that reads as a breaking change, call {@code FlagBreakingChange};
+ *   <li>draft the release notes from whatever was gathered and submit them with
+ *       {@code SubmitReleaseNotes};
+ *   <li>finish with {@link AgentDecision.Done}.
+ * </ol>
+ */
+@Component
+public class MockedReleaseNotesLlmAdapter implements ReleaseNotesLlmPort {
+
+	@Override
+	public AgentDecision decide(AgentContext context) {
+		if (context.timesCalled(TOOL_GET_WORK_ITEMS) == 0) {
+			return new AgentDecision.CallTool(TOOL_GET_WORK_ITEMS, Map.of("promotionId", context.promotionId()));
+		}
+
+		List<WorkItem> workItems = linkedWorkItems(context);
+
+		Optional<WorkItem> needsClarification = firstUnhandled(
+				workItems, context, TOOL_ASK_CLARIFICATION, item -> isBlank(item.description()));
+		if (needsClarification.isPresent()) {
+			WorkItem item = needsClarification.get();
+			return new AgentDecision.CallTool(TOOL_ASK_CLARIFICATION, Map.of(
+					"workItemId", item.id(),
+					"question", "Can you clarify the scope and impact of \"" + item.title() + "\"?"));
+		}
+
+		Optional<WorkItem> needsFlag = firstUnhandled(
+				workItems, context, TOOL_FLAG_BREAKING_CHANGE, MockedReleaseNotesLlmAdapter::mentionsBreakingChange);
+		if (needsFlag.isPresent()) {
+			WorkItem item = needsFlag.get();
+			return new AgentDecision.CallTool(TOOL_FLAG_BREAKING_CHANGE, Map.of(
+					"workItemId", item.id(),
+					"reason", "\"" + item.title() + "\" reads as a breaking change."));
+		}
+
+		if (context.timesCalled(TOOL_SUBMIT_RELEASE_NOTES) == 0) {
+			return new AgentDecision.CallTool(TOOL_SUBMIT_RELEASE_NOTES, Map.of("draft", draft(context, workItems)));
+		}
+
+		return new AgentDecision.Done(
+				"Release notes drafted and submitted for promotion " + context.promotionId().value() + ".");
+	}
+
+	/** The first work item matching {@code needsHandling} that hasn't already had {@code toolName} called for it. */
+	private Optional<WorkItem> firstUnhandled(
+			List<WorkItem> workItems, AgentContext context, String toolName, java.util.function.Predicate<WorkItem> needsHandling) {
+		Set<String> alreadyHandled = workItemIdsCalledFor(context, toolName);
+		return workItems.stream()
+				.filter(item -> needsHandling.test(item) && !alreadyHandled.contains(item.id()))
+				.findFirst();
+	}
+
+	private Set<String> workItemIdsCalledFor(AgentContext context, String toolName) {
+		return context.callsOf(toolName).stream()
+				.map(call -> (String) call.arguments().get("workItemId"))
+				.collect(Collectors.toSet());
+	}
+
+	@SuppressWarnings("unchecked")
+	private List<WorkItem> linkedWorkItems(AgentContext context) {
+		List<WorkItem> workItems = (List<WorkItem>) context.lastResultOf(TOOL_GET_WORK_ITEMS);
+		return workItems == null ? List.of() : workItems;
+	}
+
+	private static boolean isBlank(String value) {
+		return value == null || value.isBlank();
+	}
+
+	private static boolean mentionsBreakingChange(WorkItem item) {
+		String haystack = (item.title() + " " + (item.description() == null ? "" : item.description())).toLowerCase();
+		return haystack.contains("breaking");
+	}
+
+	private String draft(AgentContext context, List<WorkItem> workItems) {
+		StringBuilder draft = new StringBuilder()
+				.append("Release notes for ").append(context.applicationId().value())
+				.append(" version ").append(context.version().value()).append("\n\n");
+
+		if (workItems.isEmpty()) {
+			draft.append("No linked work items found for this release.\n");
+		} else {
+			draft.append("Included work items:\n");
+			for (WorkItem item : workItems) {
+				draft.append("- ").append(item.id()).append(": ").append(item.title())
+						.append(" (").append(item.url()).append(")\n");
+				String clarification = clarificationAnswerFor(context, item.id());
+				if (clarification != null) {
+					draft.append("  Clarification: ").append(clarification).append("\n");
+				}
+			}
+		}
+
+		List<ToolCallRecord> breakingChanges = context.callsOf(TOOL_FLAG_BREAKING_CHANGE);
+		if (!breakingChanges.isEmpty()) {
+			draft.append("\nBreaking changes:\n");
+			for (ToolCallRecord call : breakingChanges) {
+				draft.append("- ").append(call.arguments().get("workItemId"))
+						.append(": ").append(call.arguments().get("reason")).append("\n");
+			}
+		}
+
+		return draft.toString();
+	}
+
+	private String clarificationAnswerFor(AgentContext context, String workItemId) {
+		return context.callsOf(TOOL_ASK_CLARIFICATION).stream()
+				.filter(call -> workItemId.equals(call.arguments().get("workItemId")))
+				.map(call -> (String) call.result())
+				.reduce((first, second) -> second)
+				.orElse(null);
+	}
+}
+Now the consumer:
+
+Edit ReleaseNotesAgentConsumer.java
+Removed 2 lines
+Now let's fix the rest of the consumer — onEvent loop and executeTool/saveReleaseNotes.
+
+Edit ReleaseNotesAgentConsumer.java
+Added 6 lines
+Update Todos
+
+Rewrite SPECS.md §9 with the new agent description and 4-tool contract
+
+Update ReleaseNotesLlmPort tool constants + javadoc
+
+Add description field to WorkItem; add answerClarification to IssueTrackerPort + in-memory adapter
+
+Update ToolCallRecord/AgentContext to carry tool arguments
+
+Rewrite MockedReleaseNotesLlmAdapter for GetWorkItems/AskClarification/FlagBreakingChange/SubmitReleaseNotes loop
+
+Update ReleaseNotesAgentConsumer executeTool switch
+
+Update unit/integration tests for the new tool set
+
+Update README.md AI release-notes agent section
+
+Compile and run affected tests
+Now let's update the tests. First, InMemoryIssueTrackerAdapterTest:
+
+Write InMemoryIssueTrackerAdapterTest.java
+Write failed
+package com.releasepilot.infrastructure.adapters.inmemory;
+
+import com.releasepilot.domain.ports.WorkItem;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Version;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class InMemoryIssueTrackerAdapterTest {
+
+	private final InMemoryIssueTrackerAdapter adapter = new InMemoryIssueTrackerAdapter();
+
+	@Test
+	void returnsAnEmptyListWhenNothingHasBeenSeeded() {
+		assertThat(adapter.getLinkedWorkItems(ApplicationId.random(), new Version("1.0.0"))).isEmpty();
+	}
+
+	@Test
+	void returnsTheSeededWorkItemsForTheExactApplicationAndVersion() {
+		ApplicationId applicationId = ApplicationId.random();
+		Version version = new Version("1.0.0");
+		WorkItem workItem = new WorkItem("TICKET-1", "Fix the thing", "https://tracker.example/TICKET-1", "Fixed it.");
+		adapter.seed(applicationId, version, List.of(workItem));
+
+		assertThat(adapter.getLinkedWorkItems(applicationId, version)).containsExactly(workItem);
+	}
+
+	@Test
+	void doesNotReturnWorkItemsSeededForADifferentVersion() {
+		ApplicationId applicationId = ApplicationId.random();
+		adapter.seed(applicationId, new Version("1.0.0"), List.of(new WorkItem("TICKET-1", "Fix", "url", "desc")));
+
+		assertThat(adapter.getLinkedWorkItems(applicationId, new Version("2.0.0"))).isEmpty();
+	}
+
+	@Test
+	void answerClarificationReturnsAGenericAnswerWhenNothingHasBeenSeeded() {
+		assertThat(adapter.answerClarification("TICKET-1", "What's the impact?"))
+				.isEqualTo("No additional details available for TICKET-1.");
+	}
+
+	@Test
+	void answerClarificationReturnsTheSeededAnswer() {
+		adapter.seedClarificationAnswer("TICKET-1", "Only affects the admin dashboard.");
+
+		assertThat(adapter.answerClarification("TICKET-1", "What's the impact?"))
+				.isEqualTo("Only affects the admin dashboard.");
+	}
+}
+I already read it earlier in this session, but the tool wants a fresh Read since content changed context. Let me re-read then write.
+
+Read InMemoryIssueTrackerAdapterTest.java
+Write InMemoryIssueTrackerAdapterTest.java
+53 lines
+package com.releasepilot.infrastructure.adapters.inmemory;
+
+import com.releasepilot.domain.ports.WorkItem;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.Version;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class InMemoryIssueTrackerAdapterTest {
+
+	private final InMemoryIssueTrackerAdapter adapter = new InMemoryIssueTrackerAdapter();
+
+	@Test
+	void returnsAnEmptyListWhenNothingHasBeenSeeded() {
+		assertThat(adapter.getLinkedWorkItems(ApplicationId.random(), new Version("1.0.0"))).isEmpty();
+	}
+
+	@Test
+	void returnsTheSeededWorkItemsForTheExactApplicationAndVersion() {
+		ApplicationId applicationId = ApplicationId.random();
+		Version version = new Version("1.0.0");
+		WorkItem workItem = new WorkItem("TICKET-1", "Fix the thing", "https://tracker.example/TICKET-1", "Fixed it.");
+		adapter.seed(applicationId, version, List.of(workItem));
+
+		assertThat(adapter.getLinkedWorkItems(applicationId, version)).containsExactly(workItem);
+	}
+
+	@Test
+	void doesNotReturnWorkItemsSeededForADifferentVersion() {
+		ApplicationId applicationId = ApplicationId.random();
+		adapter.seed(applicationId, new Version("1.0.0"), List.of(new WorkItem("TICKET-1", "Fix", "url", "desc")));
+
+		assertThat(adapter.getLinkedWorkItems(applicationId, new Version("2.0.0"))).isEmpty();
+	}
+
+	@Test
+	void answerClarificationReturnsAGenericAnswerWhenNothingHasBeenSeeded() {
+		assertThat(adapter.answerClarification("TICKET-1", "What's the impact?"))
+				.isEqualTo("No additional details available for TICKET-1.");
+	}
+
+	@Test
+	void answerClarificationReturnsTheSeededAnswer() {
+		adapter.seedClarificationAnswer("TICKET-1", "Only affects the admin dashboard.");
+
+		assertThat(adapter.answerClarification("TICKET-1", "What's the impact?"))
+				.isEqualTo("Only affects the admin dashboard.");
+	}
+}
+Now let's rewrite MockedReleaseNotesLlmAdapterTest.
+
+Write MockedReleaseNotesLlmAdapterTest.java
+150 lines
+package com.releasepilot.infrastructure.adapters.inmemory;
+
+import com.releasepilot.domain.ports.AgentContext;
+import com.releasepilot.domain.ports.AgentDecision;
+import com.releasepilot.domain.ports.ReleaseNotesLlmPort;
+import com.releasepilot.domain.ports.WorkItem;
+import com.releasepilot.domain.promotion.ApplicationId;
+import com.releasepilot.domain.promotion.PromotionId;
+import com.releasepilot.domain.promotion.Version;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Exercises the mocked LLM's decisions directly (SPECS §9) — no consumer, no database, no broker —
+ * proving the deterministic "model" walks the loop shape the spec describes: fetch work items, ask
+ * clarification for any that are too thin to summarize, flag any that read as a breaking change,
+ * submit a draft referencing whatever was found, then finish.
+ */
+class MockedReleaseNotesLlmAdapterTest {
+
+	private final MockedReleaseNotesLlmAdapter llm = new MockedReleaseNotesLlmAdapter();
+	private final PromotionId promotionId = PromotionId.random();
+	private final ApplicationId applicationId = ApplicationId.random();
+	private final Version version = new Version("1.2.0");
+
+	@Test
+	void firstDecisionAlwaysFetchesWorkItems() {
+		AgentContext context = AgentContext.start(promotionId, applicationId, version);
+
+		AgentDecision decision = llm.decide(context);
+
+		assertThat(decision).isInstanceOf(AgentDecision.CallTool.class);
+		var callTool = (AgentDecision.CallTool) decision;
+		assertThat(callTool.toolName()).isEqualTo(ReleaseNotesLlmPort.TOOL_GET_WORK_ITEMS);
+		assertThat(callTool.arguments()).containsEntry("promotionId", promotionId);
+	}
+
+	@Test
+	void asksClarificationForAWorkItemMissingADescription() {
+		WorkItem thin = new WorkItem("TICKET-1", "Improve caching", "https://tracker.example/TICKET-1", null);
+		AgentContext context = start().withToolResult(
+				ReleaseNotesLlmPort.TOOL_GET_WORK_ITEMS, Map.of("promotionId", promotionId), List.of(thin));
+
+		AgentDecision decision = llm.decide(context);
+
+		assertThat(decision).isInstanceOf(AgentDecision.CallTool.class);
+		var callTool = (AgentDecision.CallTool) decision;
+		assertThat(callTool.toolName()).isEqualTo(ReleaseNotesLlmPort.TOOL_ASK_CLARIFICATION);
+		assertThat(callTool.arguments()).containsEntry("workItemId", "TICKET-1");
+	}
+
+	@Test
+	void doesNotAskClarificationAgainOnceAnAnswerWasRecordedForThatWorkItem() {
+		WorkItem thin = new WorkItem("TICKET-1", "Improve caching", "https://tracker.example/TICKET-1", null);
+		AgentContext context = start()
+				.withToolResult(ReleaseNotesLlmPort.TOOL_GET_WORK_ITEMS, Map.of("promotionId", promotionId), List.of(thin))
+				.withToolResult(
+						ReleaseNotesLlmPort.TOOL_ASK_CLARIFICATION,
+						Map.of("workItemId", "TICKET-1", "question", "clarify?"),
+						"Only affects internal caching.");
+
+		AgentDecision decision = llm.decide(context);
+
+		assertThat(decision).isInstanceOf(AgentDecision.CallTool.class);
+		assertThat(((AgentDecision.CallTool) decision).toolName()).isEqualTo(ReleaseNotesLlmPort.TOOL_SUBMIT_RELEASE_NOTES);
+	}
+
+	@Test
+	void flagsAWorkItemThatMentionsABreakingChange() {
+		WorkItem breaking = new WorkItem(
+				"TICKET-2", "Remove legacy auth endpoint", "https://tracker.example/TICKET-2",
+				"This is a breaking change for API v1 clients.");
+		AgentContext context = start().withToolResult(
+				ReleaseNotesLlmPort.TOOL_GET_WORK_ITEMS, Map.of("promotionId", promotionId), List.of(breaking));
+
+		AgentDecision decision = llm.decide(context);
+
+		assertThat(decision).isInstanceOf(AgentDecision.CallTool.class);
+		var callTool = (AgentDecision.CallTool) decision;
+		assertThat(callTool.toolName()).isEqualTo(ReleaseNotesLlmPort.TOOL_FLAG_BREAKING_CHANGE);
+		assertThat(callTool.arguments()).containsEntry("workItemId", "TICKET-2");
+	}
+
+	@Test
+	void movesStraightToSubmittingWhenNoWorkItemNeedsClarificationOrFlagging() {
+		WorkItem clear = new WorkItem("TICKET-3", "Fix typo in footer", "https://tracker.example/TICKET-3", "Fixed a typo.");
+		AgentContext context = start().withToolResult(
+				ReleaseNotesLlmPort.TOOL_GET_WORK_ITEMS, Map.of("promotionId", promotionId), List.of(clear));
+
+		AgentDecision decision = llm.decide(context);
+
+		assertThat(decision).isInstanceOf(AgentDecision.CallTool.class);
+		assertThat(((AgentDecision.CallTool) decision).toolName()).isEqualTo(ReleaseNotesLlmPort.TOOL_SUBMIT_RELEASE_NOTES);
+	}
+
+	@Test
+	void submitsADraftReferencingClarificationsAndBreakingChangesThenFinishes() {
+		WorkItem thin = new WorkItem("TICKET-1", "Improve caching", "https://tracker.example/TICKET-1", null);
+		WorkItem breaking = new WorkItem(
+				"TICKET-2", "Remove legacy auth endpoint", "https://tracker.example/TICKET-2",
+				"This is a breaking change for API v1 clients.");
+		AgentContext context = start()
+				.withToolResult(
+						ReleaseNotesLlmPort.TOOL_GET_WORK_ITEMS, Map.of("promotionId", promotionId), List.of(thin, breaking))
+				.withToolResult(
+						ReleaseNotesLlmPort.TOOL_ASK_CLARIFICATION,
+						Map.of("workItemId", "TICKET-1", "question", "clarify?"),
+						"Only affects internal caching.")
+				.withToolResult(
+						ReleaseNotesLlmPort.TOOL_FLAG_BREAKING_CHANGE,
+						Map.of("workItemId", "TICKET-2", "reason", "removes a public endpoint"),
+						null);
+
+		AgentDecision decision = llm.decide(context);
+
+		assertThat(decision).isInstanceOf(AgentDecision.CallTool.class);
+		var callTool = (AgentDecision.CallTool) decision;
+		assertThat(callTool.toolName()).isEqualTo(ReleaseNotesLlmPort.TOOL_SUBMIT_RELEASE_NOTES);
+		String draftText = (String) callTool.arguments().get("draft");
+		assertThat(draftText).contains(
+				"TICKET-1", "Improve caching", "Only affects internal caching.",
+				"TICKET-2", "removes a public endpoint");
+
+		AgentContext afterSubmit = context.withToolResult(
+				ReleaseNotesLlmPort.TOOL_SUBMIT_RELEASE_NOTES, Map.of("draft", draftText), null);
+		assertThat(llm.decide(afterSubmit)).isInstanceOf(AgentDecision.Done.class);
+	}
+
+	@Test
+	void draftsAnywayWhenThereAreNoLinkedWorkItems() {
+		AgentContext context = start().withToolResult(
+				ReleaseNotesLlmPort.TOOL_GET_WORK_ITEMS, Map.of("promotionId", promotionId), List.of());
+
+		AgentDecision decision = llm.decide(context);
+
+		assertThat(decision).isInstanceOf(AgentDecision.CallTool.class);
+		var callTool = (AgentDecision.CallTool) decision;
+		assertThat(callTool.toolName()).isEqualTo(ReleaseNotesLlmPort.TOOL_SUBMIT_RELEASE_NOTES);
+		assertThat((String) callTool.arguments().get("draft")).contains("No linked work items found");
+	}
+
+	private AgentContext start() {
+		return AgentContext.start(promotionId, applicationId, version);
+	}
+}
+Edit ReleaseNotesAgentConsumerIT.java
+Added 2 lines
+Read ReleaseNotesAgentConsumerIT.java (lines 100-129)
+Now let's add a test that exercises the clarification + breaking-change branches end-to-end through the real consumer/adapters.
+
+Edit ReleaseNotesAgentConsumerIT.java
+Added 20 lines
+Now the README section:
+
+Edit README.md
+Added 1 line
+Those are just spellcheck info-level hints, not real issues. Now let's compile and run the affected tests.
+
+Update Todos
+
+Rewrite SPECS.md §9 with the new agent description and 4-tool contract
+
+Update ReleaseNotesLlmPort tool constants + javadoc
+
+Add description field to WorkItem; add answerClarification to IssueTrackerPort + in-memory adapter
+
+Update ToolCallRecord/AgentContext to carry tool arguments
+
+Rewrite MockedReleaseNotesLlmAdapter for GetWorkItems/AskClarification/FlagBreakingChange/SubmitReleaseNotes loop
+
+Update ReleaseNotesAgentConsumer executeTool switch
+
+Update unit/integration tests for the new tool set
+
+Update README.md AI release-notes agent section
+
+Compile and run affected tests
+Bash Compile the project offline
+IN
+ls mvnw 2>/dev/null && ./mvnw -q -o compile 2>&1 | tail -100
+
+OUT
+mvnw
+Bash Compile main sources, show exit code
+IN
+./mvnw -q -o compile 2>&1 | tail -150; echo "EXIT:$?"
+
+OUT
+EXIT:0
+Main compiles cleanly. Now let's compile the tests.
+
+Bash Compile test sources, show exit code
+IN
+./mvnw -q -o test-compile 2>&1 | tail -200; echo "EXIT:$?"
+
+OUT
+EXIT:0
+Tests compile too. Now let's run the specific unit tests for the agent (not the Testcontainers IT, which requires Docker) and check if Docker's available.
+
+Bash Run mocked LLM adapter and issue tracker adapter unit tests
+IN
+./mvnw -q -o test -Dtest=MockedReleaseNotesLlmAdapterTest,InMemoryIssueTrackerAdapterTest 2>&1 | tail -150; echo "EXIT:$?"
+
+OUT
+EXIT:0
+Both unit test classes pass. Let's check if Docker is available to run the Testcontainers-based ReleaseNotesAgentConsumerIT.
+
+Bash Check Docker availability for Testcontainers IT
+IN
+docker info >/dev/null 2>&1 && echo DOCKER_OK || echo NO_DOCKER
+
+OUT
+DOCKER_OK
+Docker's available — let's run the integration test too.
+
+Bash Run the release-notes agent consumer integration test via Testcontainers
+IN
+./mvnw -q -o verify -Dtest=ReleaseNotesAgentConsumerIT -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=ReleaseNotesAgentConsumerIT 2>&1 | tail -200; echo "EXIT:$?"
+
+OUT
+16:58:59.982 [main] INFO org.testcontainers.images.PullPolicy -- Image pull policy will be performed by: DefaultPullPolicy()
+16:58:59.984 [main] INFO org.testcontainers.utility.ImageNameSubstitutor -- Image name substitution will be performed by: DefaultImageNameSubstitutor (composite of 'ConfigurationFileImageNameSubstitutor' and 'PrefixingImageNameSubstitutor')
+16:58:59.998 [main] INFO org.testcontainers.DockerClientFactory -- Testcontainers version: 2.0.5
+16:59:00.067 [main] INFO org.testcontainers.dockerclient.DockerClientProviderStrategy -- Loaded org.testcontainers.dockerclient.UnixSocketClientProviderStrategy from ~/.testcontainers.properties, will try it first
+16:59:00.241 [main] INFO org.testcontainers.dockerclient.DockerClientProviderStrategy -- Found Docker environment with local Unix socket (unix:///var/run/docker.sock)
+16:59:00.243 [main] INFO org.testcontainers.DockerClientFactory -- Docker host IP address is localhost
+16:59:00.253 [main] INFO org.testcontainers.DockerClientFactory -- Connected to docker: 
+  Server Version: 29.6.2
+  API Version: 1.55
+  Operating System: Ubuntu 24.04.4 LTS
+  Total Memory: 61732 MB
+16:59:00.281 [main] INFO tc.testcontainers/ryuk:0.14.0 -- Creating container for image: testcontainers/ryuk:0.14.0
+16:59:00.283 [main] INFO org.testcontainers.utility.RegistryAuthLocator -- Failure when attempting to lookup auth config. Please ignore if you don't have images in an authenticated registry. Details: (dockerImageName: testcontainers/ryuk:0.14.0, configFile: /home/juanjo/.docker/config.json, configEnv: DOCKER_AUTH_CONFIG). Falling back to docker-java default behaviour. Exception message: Status 404: No config supplied. Checked in order: /home/juanjo/.docker/config.json (file not found), DOCKER_AUTH_CONFIG (not set)
+16:59:00.357 [main] INFO tc.testcontainers/ryuk:0.14.0 -- Container testcontainers/ryuk:0.14.0 is starting: 6fe18df38049401d33c5d8216651e7c8861f8e756783ef02978bd9d513d632d2
+16:59:00.533 [main] INFO tc.testcontainers/ryuk:0.14.0 -- Container testcontainers/ryuk:0.14.0 started in PT0.251384447S
+16:59:00.535 [main] INFO org.testcontainers.utility.RyukResourceReaper -- Ryuk started - will monitor and terminate Testcontainers containers on JVM exit
+16:59:00.535 [main] INFO org.testcontainers.DockerClientFactory -- Checking the system...
+16:59:00.535 [main] INFO org.testcontainers.DockerClientFactory -- ✔︎ Docker server version should be at least 1.6.0
+16:59:00.536 [main] INFO tc.postgres:16-alpine -- Creating container for image: postgres:16-alpine
+16:59:00.568 [main] INFO tc.postgres:16-alpine -- Container postgres:16-alpine is starting: cdbdd796354933649ffcb1d4ee34b9e1e65ef37586b381368c212e35a3daa940
+16:59:01.375 [main] INFO tc.postgres:16-alpine -- Container postgres:16-alpine started in PT0.838860374S
+16:59:01.375 [main] INFO tc.postgres:16-alpine -- Container is started (JDBC URL: jdbc:postgresql://localhost:32814/test?loggerLevel=OFF)
+16:59:01.382 [main] INFO com.zaxxer.hikari.HikariDataSource -- HikariPool-1 - Starting...
+16:59:01.441 [main] INFO com.zaxxer.hikari.pool.HikariPool -- HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@6cf0a747
+16:59:01.441 [main] INFO com.zaxxer.hikari.HikariDataSource -- HikariPool-1 - Start completed.
+16:59:01.547 [main] INFO org.flywaydb.core.FlywayExecutor -- Database: jdbc:postgresql://localhost:32814/test?loggerLevel=OFF (PostgreSQL 16.14)
+16:59:01.572 [main] INFO org.flywaydb.core.internal.schemahistory.JdbcTableSchemaHistory -- Schema history table "public"."flyway_schema_history" does not exist yet
+16:59:01.574 [main] INFO org.flywaydb.core.internal.command.DbValidate -- Successfully validated 6 migrations (execution time 00:00.011s)
+16:59:01.582 [main] INFO org.flywaydb.core.internal.schemahistory.JdbcTableSchemaHistory -- Creating Schema History table "public"."flyway_schema_history" ...
+16:59:01.607 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Current version of schema "public": << Empty Schema >>
+16:59:01.615 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "1 - create promotions table"
+16:59:01.632 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "2 - create outbox events table"
+16:59:01.645 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "3 - create read model tables"
+16:59:01.658 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "4 - create audit log table"
+16:59:01.665 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "5 - create release notes table"
+16:59:01.671 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "6 - add unique index on active promotion target"
+16:59:01.680 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Successfully applied 6 migrations to schema "public", now at version v6 (execution time 00:00.026s)
+16:59:01.778 [main] INFO com.zaxxer.hikari.HikariDataSource -- HikariPool-1 - Shutdown initiated...
+16:59:01.790 [main] INFO com.zaxxer.hikari.HikariDataSource -- HikariPool-1 - Shutdown completed.
+16:59:02.665 [main] INFO org.testcontainers.images.PullPolicy -- Image pull policy will be performed by: DefaultPullPolicy()
+16:59:02.668 [main] INFO org.testcontainers.utility.ImageNameSubstitutor -- Image name substitution will be performed by: DefaultImageNameSubstitutor (composite of 'ConfigurationFileImageNameSubstitutor' and 'PrefixingImageNameSubstitutor')
+16:59:02.683 [main] INFO org.testcontainers.DockerClientFactory -- Testcontainers version: 2.0.5
+16:59:02.752 [main] INFO org.testcontainers.dockerclient.DockerClientProviderStrategy -- Loaded org.testcontainers.dockerclient.UnixSocketClientProviderStrategy from ~/.testcontainers.properties, will try it first
+16:59:02.932 [main] INFO org.testcontainers.dockerclient.DockerClientProviderStrategy -- Found Docker environment with local Unix socket (unix:///var/run/docker.sock)
+16:59:02.933 [main] INFO org.testcontainers.DockerClientFactory -- Docker host IP address is localhost
+16:59:02.943 [main] INFO org.testcontainers.DockerClientFactory -- Connected to docker: 
+  Server Version: 29.6.2
+  API Version: 1.55
+  Operating System: Ubuntu 24.04.4 LTS
+  Total Memory: 61732 MB
+16:59:02.970 [main] INFO tc.testcontainers/ryuk:0.14.0 -- Creating container for image: testcontainers/ryuk:0.14.0
+16:59:02.972 [main] INFO org.testcontainers.utility.RegistryAuthLocator -- Failure when attempting to lookup auth config. Please ignore if you don't have images in an authenticated registry. Details: (dockerImageName: testcontainers/ryuk:0.14.0, configFile: /home/juanjo/.docker/config.json, configEnv: DOCKER_AUTH_CONFIG). Falling back to docker-java default behaviour. Exception message: Status 404: No config supplied. Checked in order: /home/juanjo/.docker/config.json (file not found), DOCKER_AUTH_CONFIG (not set)
+16:59:03.040 [main] INFO tc.testcontainers/ryuk:0.14.0 -- Container testcontainers/ryuk:0.14.0 is starting: 4db8679b8598f4c8412df3b5875bf32520cc0b1bb69ca4bede7edecaab4e50bf
+16:59:03.208 [main] INFO tc.testcontainers/ryuk:0.14.0 -- Container testcontainers/ryuk:0.14.0 started in PT0.237815957S
+16:59:03.210 [main] INFO org.testcontainers.utility.RyukResourceReaper -- Ryuk started - will monitor and terminate Testcontainers containers on JVM exit
+16:59:03.210 [main] INFO org.testcontainers.DockerClientFactory -- Checking the system...
+16:59:03.210 [main] INFO org.testcontainers.DockerClientFactory -- ✔︎ Docker server version should be at least 1.6.0
+16:59:03.211 [main] INFO tc.postgres:16-alpine -- Creating container for image: postgres:16-alpine
+16:59:03.242 [main] INFO tc.postgres:16-alpine -- Container postgres:16-alpine is starting: 5a368f68665fdf96b88114f32cf30524a7df1a34c2682d543c72716197ca1628
+16:59:04.035 [main] INFO tc.postgres:16-alpine -- Container postgres:16-alpine started in PT0.824152097S
+16:59:04.035 [main] INFO tc.postgres:16-alpine -- Container is started (JDBC URL: jdbc:postgresql://localhost:32816/test?loggerLevel=OFF)
+16:59:04.043 [main] INFO com.zaxxer.hikari.HikariDataSource -- HikariPool-1 - Starting...
+16:59:04.103 [main] INFO com.zaxxer.hikari.pool.HikariPool -- HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@6cf0a747
+16:59:04.103 [main] INFO com.zaxxer.hikari.HikariDataSource -- HikariPool-1 - Start completed.
+16:59:04.217 [main] INFO org.flywaydb.core.FlywayExecutor -- Database: jdbc:postgresql://localhost:32816/test?loggerLevel=OFF (PostgreSQL 16.14)
+16:59:04.237 [main] INFO org.flywaydb.core.internal.schemahistory.JdbcTableSchemaHistory -- Schema history table "public"."flyway_schema_history" does not exist yet
+16:59:04.239 [main] INFO org.flywaydb.core.internal.command.DbValidate -- Successfully validated 6 migrations (execution time 00:00.008s)
+16:59:04.245 [main] INFO org.flywaydb.core.internal.schemahistory.JdbcTableSchemaHistory -- Creating Schema History table "public"."flyway_schema_history" ...
+16:59:04.267 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Current version of schema "public": << Empty Schema >>
+16:59:04.275 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "1 - create promotions table"
+16:59:04.287 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "2 - create outbox events table"
+16:59:04.295 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "3 - create read model tables"
+16:59:04.306 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "4 - create audit log table"
+16:59:04.311 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "5 - create release notes table"
+16:59:04.315 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Migrating schema "public" to version "6 - add unique index on active promotion target"
+16:59:04.320 [main] INFO org.flywaydb.core.internal.command.DbMigrate -- Successfully applied 6 migrations to schema "public", now at version v6 (execution time 00:00.018s)
+16:59:04.414 [main] INFO com.zaxxer.hikari.HikariDataSource -- HikariPool-1 - Shutdown initiated...
+16:59:04.415 [main] INFO com.zaxxer.hikari.HikariDataSource -- HikariPool-1 - Shutdown completed.
+EXIT:0
+Bash Show test report for the release notes agent consumer IT
+IN
+find target/surefire-reports target/failsafe-reports -iname "*ReleaseNotesAgentConsumerIT*" 2>/dev/null -exec cat {} \;
+
+OUT
+<persisted-output>
+Output too large (67.6KB). Full output saved to: /home/juanjo/.claude/projects/-home-juanjo-git-agile-monkeys-test/63a53987-c34b-4fbb-aadf-e0576342a2b5/tool-results/b5ysnjc7g.txt
+
+Preview (first 2KB):
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-failsafe-plugin/xsd/failsafe-test-report.xsd" version="3.0.2" name="com.releasepilot.consumers.ReleaseNotesAgentConsumerIT" time="1.943" tests="5" errors="0" skipped="0" failures="0" flakes="0">
+  <properties>
+    <property name="java.specification.version" value="21"/>
+    <property name="sun.jnu.encoding" value="UTF-8"/>
+    <property name="java.class.path" value="/home/juanjo/git/agile-monkeys-test/target/test-classes:/home/juanjo/git/agile-monkeys-test/target/classes:/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-starter-webmvc/4.0.7/spring-boot-starter-webmvc-4.0.7.jar:/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-starter/4.0.7/spring-boot-starter-4.0.7.jar:/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-starter-logging/4.0.7/spring-boot-starter-logging-4.0.7.jar:/home/juanjo/.m2/repository/ch/qos/logback/logback-classic/1.5.34/logback-classic-1.5.34.jar:/home/juanjo/.m2/repository/ch/qos/logback/logback-core/1.5.34/logback-core-1.5.34.jar:/home/juanjo/.m2/repository/org/apache/logging/log4j/log4j-to-slf4j/2.25.4/log4j-to-slf4j-2.25.4.jar:/home/juanjo/.m2/repository/org/apache/logging/log4j/log4j-api/2.25.4/log4j-api-2.25.4.jar:/home/juanjo/.m2/repository/org/slf4j/jul-to-slf4j/2.0.18/jul-to-slf4j-2.0.18.jar:/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-autoconfigure/4.0.7/spring-boot-autoconfigure-4.0.7.jar:/home/juanjo/.m2/repository/jakarta/annotation/jakarta.annotation-api/3.0.0/jakarta.annotation-api-3.0.0.jar:/home/juanjo/.m2/repository/org/yaml/snakeyaml/2.5/snakeyaml-2.5.jar:/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-starter-jackson/4.0.7/spring-boot-starter-jackson-4.0.7.jar:/home/juanjo/.m2/repository/org/springframework/boot/spring-boot-jackson/4.0.7/spring-boot-jackson-4.0.7.jar:/home
+...
+</persisted-output>
+5 tests, 0 errors, 0 failures — all passing, including the new clarification/breaking-change test. Let's run the full test suite to make sure nothing else broke.
+
+Bash Run full build with unit and integration tests
+IN
+./mvnw -q -o verify 2>&1 | tail -250; echo "EXIT:$?"
+
+OUT
+<persisted-output>
+Output too large (32.6KB). Full output saved to: /home/juanjo/.claude/projects/-home-juanjo-git-agile-monkeys-test/63a53987-c34b-4fbb-aadf-e0576342a2b5/tool-results/buse0bi7a.txt
+
+Preview (first 2KB):
+16:59:19.799 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.releasepilot.api.controllers.PromotionQueryControllerTest]: PromotionQueryControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+16:59:19.804 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.releasepilot.ReleasePilotApplication for test class com.releasepilot.api.controllers.PromotionQueryControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.0.7)
+
+2026-07-27T16:59:19.962+02:00  INFO 130192 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Starting PromotionQueryControllerTest using Java 21.0.11 with PID 130192 (started by juanjo in /home/juanjo/git/agile-monkeys-test)
+2026-07-27T16:59:19.962+02:00  INFO 130192 --- [           main] c.r.a.c.PromotionQueryControllerTest     : No active profile set, falling back to 1 default profile: "default"
+2026-07-27T16:59:20.262+02:00  INFO 130192 --- [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-07-27T16:59:20.262+02:00  INFO 130192 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-07-27T16:59:20.263+02:00  INFO 130192 --- [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-07-27T16:59:20.275+02:00  INFO 130192 --- [           main] c.r.a.c.PromotionQueryControllerTest     : Started PromotionQueryControllerTest in 0.447 seconds (process running for 1.48)
+...
+</persisted-output>
+EXIT:0 for the full verify — the whole build, all unit and integration tests, passes.
+
+Bash Show overall test summary from build output
+IN
+grep -rEh "Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+" /home/juanjo/.claude/projects/-home-juanjo-git-agile-monkeys-test/63a53987-c34b-4fbb-aadf-e0576342a2b5/tool-results/buse0bi7a.txt | tail -5
+
+OUT
+(Bash completed with no output)
+Bash Search full log for test summary and build result
+IN
+grep -n "Tests run\|BUILD SUCCESS\|BUILD FAILURE" /home/juanjo/.claude/projects/-home-juanjo-git-agile-monkeys-test/63a53987-c34b-4fbb-aadf-e0576342a2b5/tool-results/buse0bi7a.txt | tail -20
+
+OUT
+(Bash completed with no output)
+Bash Verify no test files report failures or errors
+IN
+grep -L "failures=\"0\" errors=\"0\"" target/surefire-reports/*.xml target/failsafe-reports/*.xml 2>/dev/null; echo "---count---"; grep -h "tests=" target/surefire-reports/*.xml target/failsafe-reports/*.xml 2>/dev/null | grep -oE 'tests="[0-9]+" errors="[0-9]+" skipped="[0-9]+" failures="[0-9]+"' 
+
+OUT
+target/surefire-reports/TEST-com.releasepilot.infrastructure.adapters.inmemory.InMemoryNotificationAdapterTest.xml
+target/surefire-reports/TEST-com.releasepilot.api.controllers.PromotionQueryControllerTest.xml
+target/surefire-reports/TEST-com.releasepilot.application.queries.PromotionQueryServiceTest.xml
+target/surefire-reports/TEST-com.releasepilot.infrastructure.adapters.inmemory.MockedReleaseNotesLlmAdapterTest.xml
+target/surefire-reports/TEST-com.releasepilot.consumers.ReleaseNotesAgentConsumerIT.xml
+target/failsafe-reports/TEST-com.releasepilot.consumers.ReadModelProjectorIT.xml
+target/failsafe-reports/failsafe-summary.xml
+target/surefire-reports/TEST-com.releasepilot.domain.promotion.PromotionTest.xml
+target/surefire-reports/TEST-com.releasepilot.application.commands.PromotionCommandServiceTest.xml
+target/surefire-reports/TEST-com.releasepilot.api.controllers.PromotionCommandControllerTest.xml
+target/surefire-reports/TEST-com.releasepilot.infrastructure.adapters.inmemory.InMemoryIssueTrackerAdapterTest.xml
+target/failsafe-reports/TEST-com.releasepilot.infrastructure.persistence.readmodel.JdbcPromotionReadModelRepositoryIT.xml
+target/failsafe-reports/TEST-com.releasepilot.infrastructure.persistence.JdbcPromotionRepositoryIT.xml
+target/failsafe-reports/TEST-com.releasepilot.infrastructure.queue.OutboxRelayIT.xml
+target/failsafe-reports/TEST-com.releasepilot.ReleasePilotApplicationIT.xml
+target/failsafe-reports/TEST-com.releasepilot.consumers.ReleaseNotesAgentConsumerIT.xml
+target/failsafe-reports/TEST-com.releasepilot.consumers.AuditLogConsumerIT.xml
+target/failsafe-reports/TEST-com.releasepilot.infrastructure.persistence.OutboxEventPublisherIT.xml
+---count---
+tests="2" errors="0" skipped="0" failures="0"
+tests="29" errors="0" skipped="0" failures="0"
+tests="5" errors="0" skipped="0" failures="0"
+tests="5" errors="0" skipped="0" failures="0"
+tests="8" errors="0" skipped="0" failures="0"
+tests="7" errors="0" skipped="0" failures="0"
+tests="6" errors="0" skipped="0" failures="0"
+tests="2" errors="0" skipped="0" failures="0"
+tests="2" errors="0" skipped="0" failures="0"
+tests="6" errors="0" skipped="0" failures="0"
+tests="2" errors="0" skipped="0" failures="0"
+tests="4" errors="0" skipped="0" failures="0"
+tests="5" errors="0" skipped="0" failures="0"
+tests="15" errors="0" skipped="0" failures="0"
+tests="10" errors="0" skipped="0" failures="0"
+tests="6" errors="0" skipped="0" failures="0"
+tests="1" errors="0" skipped="0" failures="0"
+Update Todos
+
+Rewrite SPECS.md §9 with the new agent description and 4-tool contract
+
+Update ReleaseNotesLlmPort tool constants + javadoc
+
+Add description field to WorkItem; add answerClarification to IssueTrackerPort + in-memory adapter
+
+Update ToolCallRecord/AgentContext to carry tool arguments
+
+Rewrite MockedReleaseNotesLlmAdapter for GetWorkItems/AskClarification/FlagBreakingChange/SubmitReleaseNotes loop
+
+Update ReleaseNotesAgentConsumer executeTool switch
+
+Update unit/integration tests for the new tool set
+
+Update README.md AI release-notes agent section
+
+Compile and run affected tests
+Done. Full mvn verify (unit + Testcontainers ITs) passes with zero failures.
+
+SPECS.md §9 now carries the original text you gave verbatim, plus a tool table and a loop sketch rewritten around the four real tools (GetWorkItems, AskClarification, FlagBreakingChange, SubmitReleaseNotes); §6's IssueTrackerPort row was updated to list answerClarification alongside getLinkedWorkItems.
+
+Code changes to match, all under the existing hexagonal/ports structure:
+
+ReleaseNotesLlmPort — tool-name constants renamed to the four spec tools.
+WorkItem gained a description field — a blank one is what makes the agent decide it needs AskClarification.
+IssueTrackerPort / InMemoryIssueTrackerAdapter — new answerClarification(workItemId, question), backed by a seedable canned-answer map.
+ToolCallRecord / AgentContext — tool calls now retain their arguments (not just the result), since AskClarification/FlagBreakingChange are scoped to a specific work item and the mock needs to know which one it already handled.
+MockedReleaseNotesLlmAdapter — rewritten to: fetch work items → ask clarification for any with no description → flag any that read as a breaking change → draft (folding in clarification answers and flagged items) → submit → done. This is a genuinely branching loop, not a fixed script.
+ReleaseNotesAgentConsumer — executeTool switch updated to the four tools; dropped the now-unused promotion-history lookup.
+Tests: rewrote MockedReleaseNotesLlmAdapterTest and InMemoryIssueTrackerAdapterTest for the new tool set, added an end-to-end ReleaseNotesAgentConsumerIT case exercising clarification + breaking-change flagging through Postgres, and updated existing IT fixtures for the new WorkItem shape. README's "AI release-notes agent" section was updated to match.
+

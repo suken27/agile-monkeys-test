@@ -33,6 +33,15 @@ public class OutboxRelay {
 
 	public static final String PROMOTION_EVENTS_EXCHANGE = "promotion.events";
 
+	/**
+	 * Dead-letter exchange every consumer queue routes to once a message exhausts
+	 * {@code spring.rabbitmq.listener.simple.retry} (see {@code application.yml}) — without this,
+	 * a poison message that keeps failing would either loop forever (retry/requeue misconfigured)
+	 * or vanish silently (rejected with nowhere to land). Each consumer binds its own
+	 * {@code <queue-name>.dlq} to this exchange, keyed by its own queue name.
+	 */
+	public static final String DEAD_LETTER_EXCHANGE = "promotion.events.dlx";
+
 	private static final RowMapper<OutboxRow> ROW_MAPPER = OutboxRelay::mapRow;
 
 	private final JdbcTemplate jdbcTemplate;

@@ -23,13 +23,26 @@ See [SPECS.md](SPECS.md) for the full technical specification.
 ## Prerequisites
 
 - Java 21 (JDK)
+- Docker (to run PostgreSQL and RabbitMQ via `docker-compose.yml`)
 
 No local Maven installation is required — this project uses the Maven
 Wrapper (`mvnw`).
 
 ## Running the application
 
-From the project root:
+The application needs a running PostgreSQL instance (Flyway migrates it on startup) and
+RabbitMQ instance — `application.yml` has no default `spring.datasource`/`spring.rabbitmq`
+config of its own, only profile-scoped overrides, so `spring-boot:run` **will fail to start**
+unless something is listening on `localhost:5432`/`localhost:5672` with the credentials below.
+
+Start just the database and broker (not the app itself — see "Running with Docker Compose"
+below for that) from the project root:
+
+```bash
+docker compose up -d postgres rabbitmq
+```
+
+Then, from the project root:
 
 ```bash
 ./mvnw spring-boot:run
@@ -42,6 +55,20 @@ mvnw.cmd spring-boot:run
 ```
 
 The application starts on [http://localhost:8080](http://localhost:8080).
+
+## Running with Docker Compose
+
+`docker-compose.yml` also defines the app itself and every consumer profile (`app`,
+`read-model-projector`, `audit-log-consumer`, `outbox-relay`, `release-notes-agent-consumer`),
+each built from the local [Dockerfile](Dockerfile):
+
+```bash
+docker compose up --build
+```
+
+`--build` picks up local source changes; omit it to reuse whatever image tag is already cached
+(built locally, or previously pulled from `ghcr.io/suken27/agile-monkeys-test`). Without either a
+cached image or `--build`, Compose will pull `:latest` from GHCR instead of building.
 
 ## Building
 
@@ -266,10 +293,10 @@ prove the queries themselves are correct.
 All three output ports from SPECS §6 now have in-memory stubs registered as `@Component` beans in
 `infrastructure/adapters/inmemory/`: `InMemoryDeploymentAdapter` (called synchronously by
 `StartDeployment`, needed for the app context to boot), `InMemoryIssueTrackerAdapter` (seeded/keyed
-by `(applicationId, version)`, called by the release-notes agent consumer below), and
-`InMemoryNotificationAdapter`. The latter still just has its stub bean and unit test for now — the
-Notification consumer that would call `NotificationPort.notify(...)` on terminal-state events
-(SPECS §8.3) is still to be built.
+by `(applicationId, version)`, called by the release-notes agent consumer below; also answers
+clarifying questions about a specific work item), and `InMemoryNotificationAdapter`. The latter still
+just has its stub bean and unit test for now — the Notification consumer that would call
+`NotificationPort.notify(...)` on terminal-state events (SPECS §8.3) is still to be built.
 
 ## AI release-notes agent (optional, SPECS §9)
 
@@ -277,26 +304,27 @@ Notification consumer that would call `NotificationPort.notify(...)` on terminal
 every event other than `PromotionApproved` delivered off the `promotion.events` fanout exchange is a
 no-op. On `PromotionApproved` it drives a genuine tool-calling loop rather than a single completion —
 repeatedly asking `ReleaseNotesLlmPort` (`domain/ports/`) for the next `AgentDecision` and executing
-whichever tool it names, appending the result to an `AgentContext` transcript and handing the updated
-context back for the next decision, until the LLM returns `Done` instead of another tool call:
+whichever tool it names, appending the arguments and result to an `AgentContext` transcript and
+handing the updated context back for the next decision, until the LLM returns `Done` instead of
+another tool call. The agent is given exactly the four tools SPECS §9 names:
 
-1. `get_linked_work_items` → `IssueTrackerPort`.
-2. If that first fetch came back empty, the mocked model decides to re-fetch once before giving up —
-   the "needs another tool call" branch SPECS §9 calls out — rather than always re-fetching or never
-   retrying.
-3. `get_promotion_history` → `PromotionReadModelPort`, for "since last release" framing.
-4. `save_release_notes` — persists the draft to the `release_notes` table
+1. `GetWorkItems(promotionId)` → `IssueTrackerPort.getLinkedWorkItems(...)`.
+2. `AskClarification(workItemId, question)` → `IssueTrackerPort.answerClarification(...)`, called
+   once per work item whose description is blank — too thin to summarize on its own.
+3. `FlagBreakingChange(workItemId, reason)`, called once per work item that reads as a breaking
+   change; recorded in the transcript and carried into the draft, no separate persistence needed.
+4. `SubmitReleaseNotes(draft)` — persists the draft to the `release_notes` table
    (`db/migration/V5__create_release_notes_table.sql`), upserted on `promotion_id` (a promotion is
    approved at most once) so redelivery under the outbox's at-least-once guarantee never conflicts.
 
 `ReleaseNotesLlmPort` is implemented by `MockedReleaseNotesLlmAdapter`
 (`infrastructure/adapters/inmemory/`): genuinely mocked (deterministic canned decisions keyed off the
-tool results seen so far), but the consumer round-trips through it exactly as it would a real
-chat-completions API with tool-calling. Like the other consumers, `ReleaseNotesAgentConsumer` itself
-is plain Java with no Spring dependency (SPECS §14.3); `ReleaseNotesAgentConfig`/
-`ReleaseNotesAgentListener` (`infrastructure/queue/`) wire it up and bind its queue only under the
-`release-notes-agent-consumer` Spring profile, mirroring the audit-log and read-model-projector
-consumers' deploy-as-its-own-process shape.
+tool results seen so far, branching across all four tools rather than following one fixed path), but
+the consumer round-trips through it exactly as it would a real chat-completions API with tool-calling.
+Like the other consumers, `ReleaseNotesAgentConsumer` itself is plain Java with no Spring dependency
+(SPECS §14.3); `ReleaseNotesAgentConfig`/`ReleaseNotesAgentListener` (`infrastructure/queue/`) wire it
+up and bind its queue only under the `release-notes-agent-consumer` Spring profile, mirroring the
+audit-log and read-model-projector consumers' deploy-as-its-own-process shape.
 
 ## Project structure
 

@@ -9,6 +9,8 @@ import com.releasepilot.domain.promotion.PromotionId;
 import com.releasepilot.domain.promotion.PromotionStatus;
 import com.releasepilot.domain.promotion.Role;
 import com.releasepilot.domain.promotion.Version;
+import com.releasepilot.domain.promotion.errors.DuplicatePromotionInProgressError;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -37,29 +39,41 @@ public class JdbcPromotionRepository implements PromotionRepositoryPort {
 		this.jdbcTemplate = jdbcTemplate;
 	}
 
+	/**
+	 * @throws DuplicatePromotionInProgressError if this is a newly requested promotion and
+	 *         {@code uq_promotions_active_target} (see {@code
+	 *         V6__add_unique_index_on_active_promotion_target.sql}) rejects the insert — the
+	 *         database-level backstop for invariant #2, since the application layer's own
+	 *         check-then-act (find active promotions, then insert) is not atomic under concurrent
+	 *         requests for the same (application, target environment) pair.
+	 */
 	@Override
 	public void save(Promotion promotion) {
-		jdbcTemplate.update(
-				"""
-				INSERT INTO promotions (
-				    id, application_id, version, from_environment, target_environment,
-				    requested_by_user_id, requested_by_role, status, approved_by_user_id, approved_by_role
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (id) DO UPDATE SET
-				    status = EXCLUDED.status,
-				    approved_by_user_id = EXCLUDED.approved_by_user_id,
-				    approved_by_role = EXCLUDED.approved_by_role
-				""",
-				promotion.id().value(),
-				promotion.applicationId().value(),
-				promotion.version().value(),
-				promotion.fromEnvironment().map(env -> env.name()).orElse(null),
-				promotion.targetEnvironment().name(),
-				promotion.requestedBy().userId(),
-				promotion.requestedBy().role().name(),
-				promotion.status().name(),
-				promotion.approvedBy().map(actor -> actor.userId()).orElse(null),
-				promotion.approvedBy().map(actor -> actor.role().name()).orElse(null));
+		try {
+			jdbcTemplate.update(
+					"""
+					INSERT INTO promotions (
+					    id, application_id, version, from_environment, target_environment,
+					    requested_by_user_id, requested_by_role, status, approved_by_user_id, approved_by_role
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT (id) DO UPDATE SET
+					    status = EXCLUDED.status,
+					    approved_by_user_id = EXCLUDED.approved_by_user_id,
+					    approved_by_role = EXCLUDED.approved_by_role
+					""",
+					promotion.id().value(),
+					promotion.applicationId().value(),
+					promotion.version().value(),
+					promotion.fromEnvironment().map(env -> env.name()).orElse(null),
+					promotion.targetEnvironment().name(),
+					promotion.requestedBy().userId(),
+					promotion.requestedBy().role().name(),
+					promotion.status().name(),
+					promotion.approvedBy().map(actor -> actor.userId()).orElse(null),
+					promotion.approvedBy().map(actor -> actor.role().name()).orElse(null));
+		} catch (DuplicateKeyException e) {
+			throw new DuplicatePromotionInProgressError(promotion.applicationId(), promotion.targetEnvironment());
+		}
 	}
 
 	@Override
