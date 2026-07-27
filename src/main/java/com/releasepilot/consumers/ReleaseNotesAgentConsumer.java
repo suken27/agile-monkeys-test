@@ -28,8 +28,6 @@ import java.time.Instant;
  */
 public class ReleaseNotesAgentConsumer {
 
-	private static final int HISTORY_PAGE_SIZE = 5;
-
 	private final ReleaseNotesLlmPort llm;
 	private final IssueTrackerPort issueTracker;
 	private final PromotionReadModelPort readModel;
@@ -59,26 +57,32 @@ public class ReleaseNotesAgentConsumer {
 		AgentDecision decision = llm.decide(context);
 		while (decision instanceof AgentDecision.CallTool callTool) {
 			Object result = executeTool(callTool, context);
-			context = context.withToolResult(callTool.toolName(), result);
+			context = context.withToolResult(callTool.toolName(), callTool.arguments(), result);
 			decision = llm.decide(context);
 		}
 	}
 
 	private Object executeTool(AgentDecision.CallTool callTool, AgentContext context) {
 		return switch (callTool.toolName()) {
-			case ReleaseNotesLlmPort.TOOL_GET_LINKED_WORK_ITEMS ->
+			case ReleaseNotesLlmPort.TOOL_GET_WORK_ITEMS ->
 					issueTracker.getLinkedWorkItems(context.applicationId(), context.version());
-			case ReleaseNotesLlmPort.TOOL_GET_PROMOTION_HISTORY ->
-					readModel.findApplicationPromotions(context.applicationId(), 0, HISTORY_PAGE_SIZE).items();
-			case ReleaseNotesLlmPort.TOOL_SAVE_RELEASE_NOTES -> {
-				saveReleaseNotes(context, (String) callTool.arguments().get("draftText"));
+			case ReleaseNotesLlmPort.TOOL_ASK_CLARIFICATION ->
+					issueTracker.answerClarification(
+							(String) callTool.arguments().get("workItemId"),
+							(String) callTool.arguments().get("question"));
+			case ReleaseNotesLlmPort.TOOL_FLAG_BREAKING_CHANGE ->
+					// Recorded in the transcript via its arguments; nothing further to persist here —
+					// the drafted notes carry the flag forward when SubmitReleaseNotes is called.
+					null;
+			case ReleaseNotesLlmPort.TOOL_SUBMIT_RELEASE_NOTES -> {
+				submitReleaseNotes(context, (String) callTool.arguments().get("draft"));
 				yield null;
 			}
 			default -> throw new IllegalArgumentException("Unknown tool: " + callTool.toolName());
 		};
 	}
 
-	private void saveReleaseNotes(AgentContext context, String draftText) {
+	private void submitReleaseNotes(AgentContext context, String draft) {
 		jdbcTemplate.update(
 				"""
 				INSERT INTO release_notes (promotion_id, application_id, version, draft_text, created_at)
@@ -86,7 +90,7 @@ public class ReleaseNotesAgentConsumer {
 				ON CONFLICT (promotion_id) DO UPDATE
 				SET draft_text = EXCLUDED.draft_text, created_at = EXCLUDED.created_at
 				""",
-				context.promotionId().value(), context.applicationId().value(), context.version().value(), draftText,
+				context.promotionId().value(), context.applicationId().value(), context.version().value(), draft,
 				Timestamp.from(Instant.now()));
 	}
 }

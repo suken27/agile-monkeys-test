@@ -7,12 +7,16 @@ package com.releasepilot.domain.ports;
  * Implemented by a mocked, deterministic adapter for this exercise (no real LLM API key required),
  * but {@code ReleaseNotesAgentConsumer} round-trips through this port exactly as it would a real
  * one: context in, one decision out, repeated until it returns {@link AgentDecision.Done}.
+ *
+ * <p>The agent is given exactly the four tools SPECS §9 names: {@code GetWorkItems},
+ * {@code AskClarification}, {@code FlagBreakingChange}, and {@code SubmitReleaseNotes}.
  */
 public interface ReleaseNotesLlmPort {
 
-	String TOOL_GET_LINKED_WORK_ITEMS = "get_linked_work_items";
-	String TOOL_GET_PROMOTION_HISTORY = "get_promotion_history";
-	String TOOL_SAVE_RELEASE_NOTES = "save_release_notes";
+	String TOOL_GET_WORK_ITEMS = "get_work_items";
+	String TOOL_ASK_CLARIFICATION = "ask_clarification";
+	String TOOL_FLAG_BREAKING_CHANGE = "flag_breaking_change";
+	String TOOL_SUBMIT_RELEASE_NOTES = "submit_release_notes";
 
 	AgentDecision decide(AgentContext context);
 }

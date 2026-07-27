@@ -22,7 +22,7 @@ class InMemoryIssueTrackerAdapterTest {
 	void returnsTheSeededWorkItemsForTheExactApplicationAndVersion() {
 		ApplicationId applicationId = ApplicationId.random();
 		Version version = new Version("1.0.0");
-		WorkItem workItem = new WorkItem("TICKET-1", "Fix the thing", "https://tracker.example/TICKET-1");
+		WorkItem workItem = new WorkItem("TICKET-1", "Fix the thing", "https://tracker.example/TICKET-1", "Fixed it.");
 		adapter.seed(applicationId, version, List.of(workItem));
 
 		assertThat(adapter.getLinkedWorkItems(applicationId, version)).containsExactly(workItem);
@@ -31,8 +31,22 @@ class InMemoryIssueTrackerAdapterTest {
 	@Test
 	void doesNotReturnWorkItemsSeededForADifferentVersion() {
 		ApplicationId applicationId = ApplicationId.random();
-		adapter.seed(applicationId, new Version("1.0.0"), List.of(new WorkItem("TICKET-1", "Fix", "url")));
+		adapter.seed(applicationId, new Version("1.0.0"), List.of(new WorkItem("TICKET-1", "Fix", "url", "desc")));
 
 		assertThat(adapter.getLinkedWorkItems(applicationId, new Version("2.0.0"))).isEmpty();
+	}
+
+	@Test
+	void answerClarificationReturnsAGenericAnswerWhenNothingHasBeenSeeded() {
+		assertThat(adapter.answerClarification("TICKET-1", "What's the impact?"))
+				.isEqualTo("No additional details available for TICKET-1.");
+	}
+
+	@Test
+	void answerClarificationReturnsTheSeededAnswer() {
+		adapter.seedClarificationAnswer("TICKET-1", "Only affects the admin dashboard.");
+
+		assertThat(adapter.answerClarification("TICKET-1", "What's the impact?"))
+				.isEqualTo("Only affects the admin dashboard.");
 	}
 }

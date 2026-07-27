@@ -6,6 +6,7 @@ import com.releasepilot.domain.promotion.Version;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The release-notes agent's running conversation state (SPECS §9): the fixed goal it was given up
@@ -27,24 +28,25 @@ public record AgentContext(
 				promotionId, applicationId, version, List.of());
 	}
 
-	public AgentContext withToolResult(String toolName, Object result) {
+	public AgentContext withToolResult(String toolName, Map<String, Object> arguments, Object result) {
 		List<ToolCallRecord> appended = new ArrayList<>(transcript);
-		appended.add(new ToolCallRecord(toolName, result));
+		appended.add(new ToolCallRecord(toolName, arguments, result));
 		return new AgentContext(goal, promotionId, applicationId, version, List.copyOf(appended));
 	}
 
-	/** How many times {@code toolName} has already been called — lets the mocked LLM decide to re-fetch. */
+	/** How many times {@code toolName} has already been called. */
 	public long timesCalled(String toolName) {
-		return transcript.stream().filter(call -> call.toolName().equals(toolName)).count();
+		return callsOf(toolName).size();
 	}
 
 	/** The most recent result of {@code toolName}, or {@code null} if it hasn't been called yet. */
 	public Object lastResultOf(String toolName) {
-		for (int i = transcript.size() - 1; i >= 0; i--) {
-			if (transcript.get(i).toolName().equals(toolName)) {
-				return transcript.get(i).result();
-			}
-		}
-		return null;
+		List<ToolCallRecord> calls = callsOf(toolName);
+		return calls.isEmpty() ? null : calls.get(calls.size() - 1).result();
+	}
+
+	/** Every past call to {@code toolName}, in call order — lets callers inspect what each one concerned. */
+	public List<ToolCallRecord> callsOf(String toolName) {
+		return transcript.stream().filter(call -> call.toolName().equals(toolName)).toList();
 	}
 }

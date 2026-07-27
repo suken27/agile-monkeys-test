@@ -1,14 +1,17 @@
 package com.releasepilot.infrastructure.adapters.inmemory;
 
-import com.releasepilot.application.queries.PromotionHistoryPage.PromotionHistoryItem;
 import com.releasepilot.domain.ports.AgentContext;
 import com.releasepilot.domain.ports.AgentDecision;
 import com.releasepilot.domain.ports.ReleaseNotesLlmPort;
+import com.releasepilot.domain.ports.ToolCallRecord;
 import com.releasepilot.domain.ports.WorkItem;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * In-memory stub adapter for {@link ReleaseNotesLlmPort} (SPECS §9). A genuinely mocked LLM
@@ -17,11 +20,13 @@ import java.util.Map;
  * SPECS §9 describes:
  *
  * <ol>
- *   <li>fetch linked work items;
- *   <li>if that first fetch came back empty, re-fetch once — the "decides it needs another tool
- *       call" branch the spec calls out — before giving up and drafting anyway;
- *   <li>fetch recent promotion history for "since last release" framing;
- *   <li>draft the release notes from whatever tool results were gathered and save them;
+ *   <li>fetch the promotion's linked work items with {@code GetWorkItems};
+ *   <li>for any work item too thin to summarize (blank description), ask a clarifying question
+ *       with {@code AskClarification} — one item at a time, the "decides it needs more context"
+ *       branch the spec calls out;
+ *   <li>for any work item that reads as a breaking change, call {@code FlagBreakingChange};
+ *   <li>draft the release notes from whatever was gathered and submit them with
+ *       {@code SubmitReleaseNotes};
  *   <li>finish with {@link AgentDecision.Done}.
  * </ol>
  */
@@ -30,47 +35,69 @@ public class MockedReleaseNotesLlmAdapter implements ReleaseNotesLlmPort {
 
 	@Override
 	public AgentDecision decide(AgentContext context) {
-		long workItemFetches = context.timesCalled(TOOL_GET_LINKED_WORK_ITEMS);
+		if (context.timesCalled(TOOL_GET_WORK_ITEMS) == 0) {
+			return new AgentDecision.CallTool(TOOL_GET_WORK_ITEMS, Map.of("promotionId", context.promotionId()));
+		}
 
-		if (workItemFetches == 0) {
-			return getLinkedWorkItems(context);
+		List<WorkItem> workItems = linkedWorkItems(context);
+
+		Optional<WorkItem> needsClarification = firstUnhandled(
+				workItems, context, TOOL_ASK_CLARIFICATION, item -> isBlank(item.description()));
+		if (needsClarification.isPresent()) {
+			WorkItem item = needsClarification.get();
+			return new AgentDecision.CallTool(TOOL_ASK_CLARIFICATION, Map.of(
+					"workItemId", item.id(),
+					"question", "Can you clarify the scope and impact of \"" + item.title() + "\"?"));
 		}
-		if (workItemFetches == 1 && linkedWorkItems(context).isEmpty()) {
-			return getLinkedWorkItems(context);
+
+		Optional<WorkItem> needsFlag = firstUnhandled(
+				workItems, context, TOOL_FLAG_BREAKING_CHANGE, MockedReleaseNotesLlmAdapter::mentionsBreakingChange);
+		if (needsFlag.isPresent()) {
+			WorkItem item = needsFlag.get();
+			return new AgentDecision.CallTool(TOOL_FLAG_BREAKING_CHANGE, Map.of(
+					"workItemId", item.id(),
+					"reason", "\"" + item.title() + "\" reads as a breaking change."));
 		}
-		if (context.timesCalled(TOOL_GET_PROMOTION_HISTORY) == 0) {
-			return new AgentDecision.CallTool(TOOL_GET_PROMOTION_HISTORY, Map.of("applicationId", context.applicationId()));
+
+		if (context.timesCalled(TOOL_SUBMIT_RELEASE_NOTES) == 0) {
+			return new AgentDecision.CallTool(TOOL_SUBMIT_RELEASE_NOTES, Map.of("draft", draft(context, workItems)));
 		}
-		if (context.timesCalled(TOOL_SAVE_RELEASE_NOTES) == 0) {
-			return new AgentDecision.CallTool(
-					TOOL_SAVE_RELEASE_NOTES,
-					Map.of("promotionId", context.promotionId(), "draftText", draft(context)));
-		}
-		return new AgentDecision.Done("Release notes drafted and saved for promotion " + context.promotionId().value() + ".");
+
+		return new AgentDecision.Done(
+				"Release notes drafted and submitted for promotion " + context.promotionId().value() + ".");
 	}
 
-	private AgentDecision getLinkedWorkItems(AgentContext context) {
-		return new AgentDecision.CallTool(
-				TOOL_GET_LINKED_WORK_ITEMS,
-				Map.of("applicationId", context.applicationId(), "version", context.version()));
+	/** The first work item matching {@code needsHandling} that hasn't already had {@code toolName} called for it. */
+	private Optional<WorkItem> firstUnhandled(
+			List<WorkItem> workItems, AgentContext context, String toolName, java.util.function.Predicate<WorkItem> needsHandling) {
+		Set<String> alreadyHandled = workItemIdsCalledFor(context, toolName);
+		return workItems.stream()
+				.filter(item -> needsHandling.test(item) && !alreadyHandled.contains(item.id()))
+				.findFirst();
+	}
+
+	private Set<String> workItemIdsCalledFor(AgentContext context, String toolName) {
+		return context.callsOf(toolName).stream()
+				.map(call -> (String) call.arguments().get("workItemId"))
+				.collect(Collectors.toSet());
 	}
 
 	@SuppressWarnings("unchecked")
 	private List<WorkItem> linkedWorkItems(AgentContext context) {
-		List<WorkItem> workItems = (List<WorkItem>) context.lastResultOf(TOOL_GET_LINKED_WORK_ITEMS);
+		List<WorkItem> workItems = (List<WorkItem>) context.lastResultOf(TOOL_GET_WORK_ITEMS);
 		return workItems == null ? List.of() : workItems;
 	}
 
-	@SuppressWarnings("unchecked")
-	private List<PromotionHistoryItem> promotionHistory(AgentContext context) {
-		List<PromotionHistoryItem> history = (List<PromotionHistoryItem>) context.lastResultOf(TOOL_GET_PROMOTION_HISTORY);
-		return history == null ? List.of() : history;
+	private static boolean isBlank(String value) {
+		return value == null || value.isBlank();
 	}
 
-	private String draft(AgentContext context) {
-		List<WorkItem> workItems = linkedWorkItems(context);
-		List<PromotionHistoryItem> history = promotionHistory(context);
+	private static boolean mentionsBreakingChange(WorkItem item) {
+		String haystack = (item.title() + " " + (item.description() == null ? "" : item.description())).toLowerCase();
+		return haystack.contains("breaking");
+	}
 
+	private String draft(AgentContext context, List<WorkItem> workItems) {
 		StringBuilder draft = new StringBuilder()
 				.append("Release notes for ").append(context.applicationId().value())
 				.append(" version ").append(context.version().value()).append("\n\n");
@@ -82,18 +109,30 @@ public class MockedReleaseNotesLlmAdapter implements ReleaseNotesLlmPort {
 			for (WorkItem item : workItems) {
 				draft.append("- ").append(item.id()).append(": ").append(item.title())
 						.append(" (").append(item.url()).append(")\n");
+				String clarification = clarificationAnswerFor(context, item.id());
+				if (clarification != null) {
+					draft.append("  Clarification: ").append(clarification).append("\n");
+				}
 			}
 		}
 
-		if (!history.isEmpty()) {
-			draft.append("\nSince the last release:\n");
-			for (PromotionHistoryItem entry : history) {
-				draft.append("- ").append(entry.version().value())
-						.append(" -> ").append(entry.targetEnvironment())
-						.append(" [").append(entry.status()).append("]\n");
+		List<ToolCallRecord> breakingChanges = context.callsOf(TOOL_FLAG_BREAKING_CHANGE);
+		if (!breakingChanges.isEmpty()) {
+			draft.append("\nBreaking changes:\n");
+			for (ToolCallRecord call : breakingChanges) {
+				draft.append("- ").append(call.arguments().get("workItemId"))
+						.append(": ").append(call.arguments().get("reason")).append("\n");
 			}
 		}
 
 		return draft.toString();
+	}
+
+	private String clarificationAnswerFor(AgentContext context, String workItemId) {
+		return context.callsOf(TOOL_ASK_CLARIFICATION).stream()
+				.filter(call -> workItemId.equals(call.arguments().get("workItemId")))
+				.map(call -> (String) call.result())
+				.reduce((first, second) -> second)
+				.orElse(null);
 	}
 }

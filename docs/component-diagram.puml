@@ -1,0 +1,129 @@
+@startuml ReleasePilot-Component-Diagram
+title ReleasePilot — Component Diagram (Hexagonal / CQRS)
+
+skinparam componentStyle rectangle
+skinparam wrapWidth 200
+skinparam linetype ortho
+
+' ============ API Layer ============
+package "API Layer (api)" {
+  [PromotionCommandController] as CmdCtrl
+  [PromotionQueryController] as QryCtrl
+  [ErrorMapping] as ErrMap
+}
+
+' ============ Application Layer (CQRS) ============
+package "Application Layer (application)" {
+  component "Command Side" as CmdSide {
+    [PromotionCommandService] as CmdService
+    interface "PromotionCommandPort" as CmdPort
+  }
+  component "Query Side" as QrySide {
+    [PromotionQueryService] as QryService
+    interface "PromotionQueryPort" as QryPort
+    interface "PromotionReadModelPort" as ReadModelPort
+  }
+}
+
+' ============ Domain Layer ============
+package "Domain Layer (domain)" {
+  [Promotion Aggregate] as Aggregate
+  note right of Aggregate
+    Promotion, PromotionStatus,
+    Environment, Actor, Version,
+    domain errors (sealed hierarchy)
+  end note
+
+  interface "PromotionRepositoryPort" as RepoPort
+  interface "EventPublisherPort" as EventPort
+  interface "DeploymentPort" as DeployPort
+  interface "IssueTrackerPort" as IssuePort
+  interface "NotificationPort" as NotifyPort
+  interface "ReleaseNotesLlmPort" as LlmPort
+}
+
+' ============ Infrastructure Layer ============
+package "Infrastructure Layer (infrastructure)" {
+  package "Persistence" {
+    [JdbcPromotionRepository] as JdbcRepo
+    [OutboxEventPublisher] as OutboxPub
+    [JdbcPromotionReadModelRepository] as JdbcReadModel
+    [FlywayMigrationConfig] as Flyway
+  }
+
+  package "Adapters (in-memory stubs)" {
+    [InMemoryDeploymentAdapter] as DeployAdapter
+    [InMemoryIssueTrackerAdapter] as IssueAdapter
+    [InMemoryNotificationAdapter] as NotifyAdapter
+    [MockedReleaseNotesLlmAdapter] as LlmAdapter
+  }
+
+  package "Queue (Spring AMQP)" {
+    [OutboxRelay] as Relay
+    [AuditLogListener] as AuditListener
+    [ReadModelProjectorListener] as ProjectorListener
+    [ReleaseNotesAgentListener] as AgentListener
+  }
+}
+
+' ============ Async Consumers ============
+package "Consumers (async, decoupled)" {
+  [AuditLogConsumer] as AuditConsumer
+  [ReadModelProjector] as Projector
+  [ReleaseNotesAgentConsumer] as AgentConsumer
+}
+
+' ============ External Systems ============
+database "PostgreSQL" as DB
+queue "RabbitMQ" as MQ
+
+' ============ Relationships: API -> Application ============
+CmdCtrl --> CmdPort
+QryCtrl --> QryPort
+CmdCtrl ..> ErrMap
+CmdPort <|.. CmdService
+QryPort <|.. QryService
+QryService --> ReadModelPort
+
+' ============ Relationships: Application -> Domain ============
+CmdService --> Aggregate : loads / invokes\ndomain methods
+CmdService --> RepoPort : load / save
+CmdService --> DeployPort : trigger() on\nStartDeployment
+
+' ============ Relationships: Domain Ports -> Infra Adapters ============
+RepoPort <|.. JdbcRepo
+EventPort <|.. OutboxPub
+DeployPort <|.. DeployAdapter
+IssuePort <|.. IssueAdapter
+NotifyPort <|.. NotifyAdapter
+LlmPort <|.. LlmAdapter
+ReadModelPort <|.. JdbcReadModel
+
+Aggregate --> EventPort : publishes\nDomainEvent
+
+' ============ Relationships: Persistence -> DB ============
+JdbcRepo --> DB : write-side\naggregate tables
+JdbcReadModel --> DB : read-model\nprojections
+OutboxPub --> DB : outbox table\n(same tx)
+Flyway ..> DB : migrations
+
+' ============ Relationships: Outbox -> Queue ============
+Relay --> DB : polls outbox
+Relay --> MQ : publishes events
+
+' ============ Relationships: Queue Listeners -> Consumers ============
+MQ --> AuditListener
+MQ --> ProjectorListener
+MQ --> AgentListener
+
+AuditListener --> AuditConsumer
+ProjectorListener --> Projector
+AgentListener --> AgentConsumer
+
+AuditConsumer --> DB : audit_log
+Projector --> JdbcReadModel : updates\nread models
+AgentConsumer --> IssuePort : GetWorkItems /\nAskClarification
+AgentConsumer --> LlmPort : tool-calling loop
+AgentConsumer --> DB : release_notes
+
+@enduml

@@ -100,7 +100,9 @@ class ReleaseNotesAgentConsumerIT {
 	void approvedPromotionWithLinkedWorkItemsDraftsAndSavesReleaseNotes() {
 		PromotionId promotionId = requestAndApprove(PromotionId.random());
 		issueTracker.seed(applicationId, version, List.of(
-				new WorkItem("TICKET-1", "Fix login bug", "https://issues.example.com/TICKET-1")));
+				new WorkItem(
+						"TICKET-1", "Fix login bug", "https://issues.example.com/TICKET-1",
+						"Users could not log in with expired SSO tokens.")));
 
 		consumer.onEvent(DomainEvent.of(
 				Promotion.EVENT_PROMOTION_APPROVED, promotionId, applicationId, bob, Map.of("approvedBy", "bob")));
@@ -110,6 +112,26 @@ class ReleaseNotesAgentConsumerIT {
 		assertThat(row.get("application_id")).isEqualTo(applicationId.value());
 		assertThat(row.get("version")).isEqualTo(version.value());
 		assertThat((String) row.get("draft_text")).contains("TICKET-1", "Fix login bug");
+	}
+
+	@Test
+	void approvedPromotionAsksClarificationAndFlagsBreakingChangesBeforeDrafting() {
+		PromotionId promotionId = requestAndApprove(PromotionId.random());
+		issueTracker.seed(applicationId, version, List.of(
+				new WorkItem("TICKET-1", "Improve caching", "https://issues.example.com/TICKET-1", null),
+				new WorkItem(
+						"TICKET-2", "Remove legacy auth endpoint", "https://issues.example.com/TICKET-2",
+						"This is a breaking change for API v1 clients.")));
+		issueTracker.seedClarificationAnswer("TICKET-1", "Only affects internal cache invalidation.");
+
+		consumer.onEvent(DomainEvent.of(
+				Promotion.EVENT_PROMOTION_APPROVED, promotionId, applicationId, bob, Map.of("approvedBy", "bob")));
+
+		String draftText = jdbcTemplate.queryForObject(
+				"SELECT draft_text FROM release_notes WHERE promotion_id = ?", String.class, promotionId.value());
+		assertThat(draftText).contains(
+				"TICKET-1", "Only affects internal cache invalidation.",
+				"TICKET-2", "breaking change");
 	}
 
 	@Test

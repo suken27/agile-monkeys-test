@@ -260,7 +260,7 @@ Defined as interfaces in `domain/ports/`, implemented as in-memory stubs in
 | Port | Method(s) | Used by | Stub behavior |
 |---|---|---|---|
 | `DeploymentPort` | `trigger(applicationId, version, environment): DeploymentRef` | `StartDeployment` handler | Returns a fake `deploymentRef`, records the call in memory for test assertions. |
-| `IssueTrackerPort` | `getLinkedWorkItems(applicationId, version): WorkItem[]` | Query side (promotion detail) and/or release-notes agent | Returns a canned/seeded list of fake tickets. |
+| `IssueTrackerPort` | `getLinkedWorkItems(applicationId, version): WorkItem[]`, `answerClarification(workItemId, question): String` | Query side (promotion detail) and/or release-notes agent | Returns a canned/seeded list of fake tickets, and a canned/seeded answer to a clarifying question about one of them. |
 | `NotificationPort` | `notify(event: DomainEvent): void` | Notification consumer, on terminal-state events | Logs/records the notification in memory. |
 
 Why domain-layer interfaces, application/infra-layer implementations: it lets
@@ -316,27 +316,42 @@ The API returns as soon as the command handler's transaction commits
 
 ## 9. [Optional] AI Release-Notes Agent
 
-Triggered by `PromotionApproved`. Implemented as a genuine tool-calling loop,
-not a single completion:
+When a promotion reaches Approved, trigger an agent that drafts release notes
+for it. Build a real tool-calling loop, not a single prompt, with an agent
+framework if your stack has one or hand-rolled if it doesn't. A mocked LLM
+backend is perfectly fine, we evaluate structure, not live output. Doing this
+won't make up for a weak core, but attempting it well, even partially, is a
+strong signal.
+
+The agent is given exactly four tools:
+
+| Tool | Signature | Effect |
+|---|---|---|
+| `GetWorkItems` | `GetWorkItems(promotionId)` | Returns the linked issue stubs for the promotion, backed by `IssueTrackerPort`. |
+| `AskClarification` | `AskClarification(workItemId, question)` | Asks a clarifying question about a specific work item and returns a (mocked) answer. |
+| `FlagBreakingChange` | `FlagBreakingChange(workItemId, reason)` | Flags a work item as a breaking change to be called out in the notes. |
+| `SubmitReleaseNotes` | `SubmitReleaseNotes(draft)` → persists the draft | Persists the draft to a `release_notes` table and ends the loop. |
 
 ```
 loop:
   1. Agent receives goal: "Draft release notes for promotion {id}."
-  2. Agent calls tool `get_linked_work_items(applicationId, version)`
-     → backed by IssueTrackerPort stub.
-  3. Agent calls tool `get_promotion_history(applicationId)` (optional,
-     for "since last release" framing) → backed by read model.
-  4. (Mocked LLM decides, from tool results, whether it has enough context
-     or needs another tool call — e.g. re-fetch on empty ticket list.)
-  5. Agent calls tool `save_release_notes(promotionId, draftText)` →
-     persists to a `release_notes` table.
-loop ends when agent emits a final "done" action instead of a tool call.
+  2. Agent calls `GetWorkItems(promotionId)` → backed by IssueTrackerPort stub.
+  3. For each returned work item, the (mocked) model decides whether it needs
+     more information — calling `AskClarification(workItemId, question)` for
+     items too thin to summarize, or `FlagBreakingChange(workItemId, reason)`
+     for items that read as a breaking change — before it has enough context
+     to draft.
+  4. Agent calls `SubmitReleaseNotes(draft)` → persists to the `release_notes`
+     table.
+loop ends when the agent emits a final "done" action instead of a tool call.
 ```
 
-The LLM backend is mocked (deterministic canned responses keyed off tool
-input), but the harness genuinely round-trips: prompt → tool call → tool
-result appended to context → next model call → ... → final answer. This
-demonstrates the agent loop shape without requiring a real LLM API key.
+The LLM backend is mocked (deterministic canned decisions keyed off the tool
+results seen so far), but the harness genuinely round-trips: goal → tool call
+→ tool result appended to context → next model call → ... → final answer.
+This demonstrates the agent loop shape — including a model that branches
+across more than one tool based on what it sees — without requiring a real
+LLM API key.
 
 ---
 
